@@ -56,6 +56,7 @@
             </div>
 
             <q-input
+              v-if="supportsTemperature"
               v-model.number="temperature"
               label="Temperature"
               outlined
@@ -280,6 +281,11 @@ const modelOptions = computed(() => {
     }));
 });
 
+const supportsTemperature = computed(() => {
+  const model = selectedModel.value || '';
+  return !model.includes('opus-4-7');
+});
+
 /** Image generation models don't support streaming */
 function isImageModel(modelId: string | null): boolean {
   if (!modelId) return false;
@@ -462,7 +468,7 @@ async function sendViaOpenAI(plainToken: string, assistantMsgIndex: number) {
       model: selectedModel.value,
       messages: getOpenAIMessages(),
       stream: useStream,
-      ...(temperature.value !== null && { temperature: temperature.value }),
+      ...(supportsTemperature.value && temperature.value !== null && { temperature: temperature.value }),
       ...(maxTokens.value !== null && { max_tokens: maxTokens.value }),
     }),
   });
@@ -532,7 +538,7 @@ async function sendViaAnthropic(plainToken: string, assistantMsgIndex: number) {
       messages: getAnthropicMessages(),
       stream: true,
       max_tokens: maxTokens.value || 2048,
-      ...(temperature.value !== null && { temperature: temperature.value }),
+      ...(supportsTemperature.value && temperature.value !== null && { temperature: temperature.value }),
     }),
   });
 

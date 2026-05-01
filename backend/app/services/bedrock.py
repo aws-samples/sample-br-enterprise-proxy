@@ -528,6 +528,11 @@ class BedrockClient:
                 break
         return base.startswith(cls.ANTHROPIC_BASE_PREFIX)
 
+    @staticmethod
+    def _is_no_sampling_model(model_id: str) -> bool:
+        """Models that don't support temperature/top_p/top_k (e.g. Opus 4.7+)."""
+        return "opus-4-7" in model_id
+
     # Map AWS region prefix to geographic inference profile prefix
     REGION_TO_GEO_PREFIX = {
         "us": "us",
@@ -1097,6 +1102,22 @@ class BedrockClient:
                 )
                 body["max_tokens"] = new_max
 
+        # --- Opus 4.7+ compatibility: remove deprecated sampling params ---
+        if model_id and BedrockClient._is_no_sampling_model(model_id):
+            removed = []
+            for param in ("temperature", "top_p", "top_k"):
+                if param in body:
+                    body.pop(param)
+                    removed.append(param)
+            if removed:
+                logger.info(f"Opus 4.7: stripped deprecated params {removed}")
+            thinking_cfg = body.get("thinking")
+            if isinstance(thinking_cfg, dict) and "budget_tokens" in thinking_cfg:
+                logger.info(
+                    "Opus 4.7: converting thinking.budget_tokens to type=adaptive"
+                )
+                body["thinking"] = {"type": "adaptive"}
+
         # --- fields not supported by invoke_model — warn and skip ---
         if request.prompt_variables:
             logger.warning(
@@ -1230,10 +1251,11 @@ class BedrockClient:
             params["system"] = [{"text": request.system}]
 
         # --- inferenceConfig ---
+        is_opus_47 = model_id and BedrockClient._is_no_sampling_model(model_id)
         inference_config: dict = {"maxTokens": request.max_tokens}
-        if request.temperature is not None:
+        if request.temperature is not None and not is_opus_47:
             inference_config["temperature"] = request.temperature
-        if request.top_p is not None:
+        if request.top_p is not None and not is_opus_47:
             inference_config["topP"] = request.top_p
         if request.stop_sequences:
             inference_config["stopSequences"] = request.stop_sequences

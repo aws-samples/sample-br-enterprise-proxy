@@ -10,6 +10,7 @@ from app.models.usage import UsageRecord
 from app.models.user import User
 from app.models.model_pricing import ModelPricing
 from app.models.model import Model
+from app.models.team import Team, TeamMember
 
 __all__ = [
     "User",
@@ -21,4 +22,6 @@ __all__ = [
     "AuditLog",
     "ModelPricing",
     "Model",
+    "Team",
+    "TeamMember",
 ]

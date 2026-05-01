@@ -9,6 +9,7 @@ from app.api.admin.endpoints import (
     audit,
     auth,
     models,
+    teams,
     tokens,
     usage,
     pricing,
@@ -20,6 +21,9 @@ admin_router = APIRouter()
 
 # Authentication endpoints (no auth required for login/register)
 admin_router.include_router(auth.router, prefix="/auth", tags=["admin-auth"])
+
+# Team management endpoints (JWT auth required)
+admin_router.include_router(teams.router, prefix="/teams", tags=["admin-teams"])
 
 # Token management endpoints (JWT auth required)
 admin_router.include_router(tokens.router, prefix="/tokens", tags=["admin-tokens"])

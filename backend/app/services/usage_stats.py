@@ -94,6 +94,82 @@ class UsageStatsService:
             for row in rows
         ]
 
+    async def get_usage_breakdown(
+        self,
+        user_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        granularity: str = "daily",
+        token_id: Optional[UUID] = None,
+        model: Optional[str] = None,
+        tz: str = "UTC",
+    ) -> List[dict]:
+        """
+        Get usage breakdown by token × model × time bucket.
+
+        Returns rows of (time_bucket, token_id, token_name, model,
+        prompt_tokens, completion_tokens, total_tokens, total_cost, request_count).
+        """
+        trunc_field = self._granularity_to_trunc(granularity)
+        time_expr = self._localized_time(UsageRecord.created_at, tz)
+        time_bucket = func.date_trunc(trunc_field, time_expr).label("time_bucket")
+
+        query = (
+            select(
+                time_bucket,
+                UsageRecord.token_id,
+                APIToken.name.label("token_name"),
+                UsageRecord.model,
+                func.coalesce(func.sum(UsageRecord.prompt_tokens), 0).label(
+                    "prompt_tokens"
+                ),
+                func.coalesce(func.sum(UsageRecord.completion_tokens), 0).label(
+                    "completion_tokens"
+                ),
+                func.coalesce(func.sum(UsageRecord.total_tokens), 0).label(
+                    "total_tokens"
+                ),
+                func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.0000")).label(
+                    "total_cost"
+                ),
+                func.count(UsageRecord.id).label("request_count"),
+            )
+            .join(APIToken, UsageRecord.token_id == APIToken.id)
+            .where(
+                UsageRecord.user_id == user_id,
+                UsageRecord.created_at >= start_date,
+                UsageRecord.created_at <= end_date,
+                UsageRecord.record_type == "usage",
+            )
+            .group_by(
+                time_bucket, UsageRecord.token_id, APIToken.name, UsageRecord.model
+            )
+            .order_by(time_bucket, APIToken.name, UsageRecord.model)
+        )
+
+        if token_id is not None:
+            query = query.where(UsageRecord.token_id == token_id)
+        if model is not None:
+            query = query.where(UsageRecord.model == model)
+
+        result = await self.db.execute(query)
+        rows = result.all()
+
+        return [
+            {
+                "time_bucket": row.time_bucket.isoformat(),
+                "token_id": str(row.token_id),
+                "token_name": row.token_name,
+                "model": row.model,
+                "prompt_tokens": row.prompt_tokens,
+                "completion_tokens": row.completion_tokens,
+                "total_tokens": row.total_tokens,
+                "total_cost": str(row.total_cost),
+                "request_count": row.request_count,
+            }
+            for row in rows
+        ]
+
     async def get_usage_by_token(
         self,
         user_id: UUID,

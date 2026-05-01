@@ -179,28 +179,13 @@ async def create_chat_completion(
     logger.debug(f"Full request data: {request_data.model_dump()}")
 
     try:
-        # Check token quota before processing request
-        from sqlalchemy import select, func
+        from sqlalchemy import select
         from app.models.model import Model
-        from decimal import Decimal
 
-        # Calculate total usage for this token
-        result = await db.execute(
-            select(func.sum(UsageRecord.cost_usd)).where(
-                UsageRecord.token_id == token.id
-            )
-        )
-        total_used = result.scalar() or Decimal("0.00")
+        # Check all quota tiers (lifetime, monthly, daily)
+        from app.services.quota import enforce_quota
 
-        # Set cached used amount for quota check
-        token.calculate_used_usd(total_used)
-
-        # Check if quota is exceeded
-        if token.is_quota_exceeded:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Token quota exceeded. Used: ${total_used:.2f}, Quota: ${token.quota_usd:.2f}",
-            )
+        await enforce_quota(token, db)
 
         # Validate model access by querying the models table
         result = await db.execute(
