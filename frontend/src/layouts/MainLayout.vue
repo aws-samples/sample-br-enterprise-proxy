@@ -102,6 +102,12 @@ const menuLinks = [
     to: '/',
   },
   {
+    title: 'Teams',
+    caption: 'Team budget management',
+    icon: 'groups',
+    to: '/teams',
+  },
+  {
     title: 'API Keys',
     caption: 'API Key management',
     icon: 'vpn_key',

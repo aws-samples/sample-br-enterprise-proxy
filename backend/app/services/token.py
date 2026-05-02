@@ -42,6 +42,8 @@ class TokenService:
         name: str,
         expires_at: Optional[datetime] = None,
         quota_usd: Optional[Decimal] = None,
+        monthly_quota_usd: Optional[Decimal] = None,
+        monthly_reset_policy: Optional[str] = None,
         allowed_ips: Optional[List[str]] = None,
         token_metadata: Optional[dict] = None,
     ) -> tuple[APIToken, str]:
@@ -52,7 +54,9 @@ class TokenService:
             user_id: User UUID
             name: Token name/description
             expires_at: Optional expiration datetime
-            quota_usd: Optional usage quota in USD
+            quota_usd: Optional lifetime usage quota in USD
+            monthly_quota_usd: Optional monthly budget in USD
+            monthly_reset_policy: "reset" (clear each month) or "rollover" (accumulate)
             allowed_ips: Optional list of allowed IP addresses/ranges
             token_metadata: Optional metadata dict for per-key configuration
 
@@ -73,6 +77,9 @@ class TokenService:
             encrypted_token=encrypted,
             expires_at=expires_at,
             quota_usd=quota_usd,
+            monthly_quota_usd=monthly_quota_usd,
+            monthly_reset_policy=monthly_reset_policy,
+            monthly_quota_start=datetime.utcnow() if monthly_quota_usd else None,
             allowed_ips=allowed_ips or [],
             token_metadata=token_metadata,
             is_active=True,
@@ -90,14 +97,18 @@ class TokenService:
         names: List[str],
         expires_at: Optional[datetime] = None,
         quota_usd: Optional[Decimal] = None,
+        monthly_quota_usd: Optional[Decimal] = None,
+        monthly_reset_policy: Optional[str] = None,
         allowed_ips: Optional[List[str]] = None,
         token_metadata: Optional[dict] = None,
         model_names: Optional[List[str]] = None,
+        auto_commit: bool = True,
     ) -> List[tuple[APIToken, str]]:
         """
         Batch create API tokens with explicit names and optional shared model list.
 
         All tokens are inserted in a single transaction (atomic).
+        Set auto_commit=False to defer commit (caller must commit).
 
         Returns:
             List of (APIToken, plain_token) tuples
@@ -116,6 +127,9 @@ class TokenService:
                 encrypted_token=encrypted,
                 expires_at=expires_at,
                 quota_usd=quota_usd,
+                monthly_quota_usd=monthly_quota_usd,
+                monthly_reset_policy=monthly_reset_policy,
+                monthly_quota_start=datetime.utcnow() if monthly_quota_usd else None,
                 allowed_ips=allowed_ips or [],
                 token_metadata=token_metadata,
                 is_active=True,
@@ -136,15 +150,17 @@ class TokenService:
                     )
                     self.db.add(model)
 
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+            # Refresh all tokens in a single query instead of N round-trips
+            token_ids = [t.id for t, _ in tokens_and_keys]
+            result = await self.db.execute(
+                select(APIToken).where(APIToken.id.in_(token_ids))
+            )
+            refreshed = {t.id: t for t in result.scalars().all()}
+            return [(refreshed[t.id], pk) for t, pk in tokens_and_keys]
 
-        # Refresh all tokens in a single query instead of N round-trips
-        token_ids = [t.id for t, _ in tokens_and_keys]
-        result = await self.db.execute(
-            select(APIToken).where(APIToken.id.in_(token_ids))
-        )
-        refreshed = {t.id: t for t in result.scalars().all()}
-        return [(refreshed[t.id], pk) for t, pk in tokens_and_keys]
+        return tokens_and_keys
 
     async def get_token_by_id(self, token_id: UUID) -> Optional[APIToken]:
         """

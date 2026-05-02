@@ -23,6 +23,9 @@ export interface APIToken {
   created_at: string;
   last_used_at: string | null;
   token_metadata?: TokenMetadata | null;
+  team_id?: string | null;
+  team_name?: string | null;
+  allocated_usd?: string | null;
 }
 
 export interface APITokenWithKey extends APIToken {

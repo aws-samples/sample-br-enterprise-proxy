@@ -30,6 +30,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/DashboardPage.vue'),
       },
       {
+        path: 'teams',
+        name: 'teams',
+        component: () => import('pages/TeamsPage.vue'),
+      },
+      {
         path: 'tokens',
         name: 'tokens',
         component: () => import('pages/TokensPage.vue'),

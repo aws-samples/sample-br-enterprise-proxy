@@ -30,6 +30,9 @@ class APIToken(Base):
     # Expiration and quotas
     expires_at = Column(DateTime, nullable=True)
     quota_usd = Column(Numeric(10, 2), nullable=True)
+    monthly_quota_usd = Column(Numeric(10, 2), nullable=True)
+    monthly_reset_policy = Column(String(20), nullable=True)
+    monthly_quota_start = Column(DateTime, nullable=True)
 
     # Access control
     allowed_ips = Column(ARRAY(String), nullable=True)
@@ -55,6 +58,12 @@ class APIToken(Base):
         "UsageRecord", back_populates="token", cascade="all, delete-orphan"
     )
     models = relationship("Model", back_populates="token", cascade="all, delete-orphan")
+    team_membership = relationship(
+        "TeamMember",
+        back_populates="token",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<APIToken(id={self.id}, name={self.name}, user_id={self.user_id})>"

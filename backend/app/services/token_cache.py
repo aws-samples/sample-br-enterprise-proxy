@@ -86,6 +86,15 @@ class CachedTokenService:
             "name": token.name,
             "expires_at": token.expires_at.isoformat() if token.expires_at else None,
             "quota_usd": str(token.quota_usd) if token.quota_usd else None,
+            "monthly_quota_usd": (
+                str(token.monthly_quota_usd) if token.monthly_quota_usd else None
+            ),
+            "monthly_reset_policy": token.monthly_reset_policy,
+            "monthly_quota_start": (
+                token.monthly_quota_start.isoformat()
+                if token.monthly_quota_start
+                else None
+            ),
             "allowed_ips": token.allowed_ips,
             "is_active": token.is_active,
         }
@@ -97,8 +106,6 @@ class CachedTokenService:
             from datetime import datetime
             from decimal import Decimal
 
-            # Create a minimal token object for validation
-            # Note: This is not a full ORM object, just for validation
             token = APIToken()
             token.id = UUID(cached_data["id"])
             token.user_id = UUID(cached_data["user_id"])
@@ -110,6 +117,17 @@ class CachedTokenService:
             )
             token.quota_usd = (
                 Decimal(cached_data["quota_usd"]) if cached_data["quota_usd"] else None
+            )
+            token.monthly_quota_usd = (
+                Decimal(cached_data["monthly_quota_usd"])
+                if cached_data.get("monthly_quota_usd")
+                else None
+            )
+            token.monthly_reset_policy = cached_data.get("monthly_reset_policy")
+            token.monthly_quota_start = (
+                datetime.fromisoformat(cached_data["monthly_quota_start"])
+                if cached_data.get("monthly_quota_start")
+                else None
             )
             token.allowed_ips = cached_data["allowed_ips"]
             token.is_active = cached_data["is_active"]

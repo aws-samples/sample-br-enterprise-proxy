@@ -2,18 +2,22 @@
 API Token management endpoints.
 """
 
+import calendar
+import uuid as uuid_mod
 from datetime import datetime
 from decimal import Decimal
 from typing import List
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user_from_jwt, get_token_service
 from app.core.database import get_db
 from app.core.security import decrypt_token
+from app.models.team import Team, TeamMember
 from app.models.token import APIToken
 from app.models.usage import UsageRecord
 from app.models.user import User
@@ -64,6 +68,8 @@ class CreateTokenRequest(BaseModel):
     name: str
     expires_at: datetime | None = None
     quota_usd: Decimal | None = None
+    monthly_quota_usd: Decimal | None = None
+    monthly_reset_policy: str | None = None
     allowed_ips: List[str] | None = None
     token_metadata: dict | None = None
 
@@ -78,6 +84,8 @@ class BatchCreateTokenRequest(BaseModel):
     names: str
     expires_at: datetime | None = None
     quota_usd: Decimal | None = None
+    monthly_quota_usd: Decimal | None = None
+    monthly_reset_policy: str | None = None
     allowed_ips: List[str] | None = None
     token_metadata: dict | None = None
     model_names: List[str] | None = None
@@ -97,6 +105,8 @@ class UpdateTokenRequest(BaseModel):
     name: str | None = None
     expires_at: datetime | None = None
     quota_usd: Decimal | None = None
+    monthly_quota_usd: Decimal | None = None
+    monthly_reset_policy: str | None = None
     allowed_ips: List[str] | None = None
     is_active: bool | None = None
     token_metadata: dict | None = None
@@ -110,7 +120,12 @@ class TokenResponse(BaseModel):
     key_prefix: str = "sk-ant-api03"
     expires_at: datetime | None
     quota_usd: str | None
+    monthly_quota_usd: str | None = None
+    daily_limit_usd: str | None = None
+    monthly_reset_policy: str | None = None
     used_usd: str
+    monthly_used_usd: str | None = None
+    daily_used_usd: str | None = None
     remaining_quota: str | None
     allowed_ips: List[str]
     is_active: bool
@@ -119,6 +134,9 @@ class TokenResponse(BaseModel):
     created_at: datetime
     last_used_at: datetime | None
     token_metadata: dict | None = None
+    team_id: str | None = None
+    team_name: str | None = None
+    allocated_usd: str | None = None
 
     class Config:
         from_attributes = True
@@ -138,14 +156,51 @@ class BatchCreateTokenResponse(BaseModel):
 
 
 # Helper functions
-async def calculate_token_used_usd(token: APIToken, db: AsyncSession) -> Decimal:
-    """Calculate total used amount for a token from usage records."""
-    usage_query = select(
-        func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.00"))
-    ).where(UsageRecord.token_id == token.id)
+class TokenUsageSummary:
+    """Usage summary for a token across all time windows."""
 
-    result = await db.execute(usage_query)
-    return result.scalar()
+    def __init__(
+        self,
+        total: Decimal,
+        monthly: Decimal = Decimal("0.00"),
+        daily: Decimal = Decimal("0.00"),
+    ):
+        self.total = total
+        self.monthly = monthly
+        self.daily = daily
+
+
+async def calculate_token_usage(token: APIToken, db: AsyncSession) -> TokenUsageSummary:
+    """Calculate total, monthly, and daily used amount for a token."""
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    day_start = datetime(now.year, now.month, now.day)
+
+    result = await db.execute(
+        select(
+            func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.00")),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (UsageRecord.created_at >= month_start, UsageRecord.cost_usd),
+                        else_=Decimal("0.00"),
+                    )
+                ),
+                Decimal("0.00"),
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (UsageRecord.created_at >= day_start, UsageRecord.cost_usd),
+                        else_=Decimal("0.00"),
+                    )
+                ),
+                Decimal("0.00"),
+            ),
+        ).where(UsageRecord.token_id == token.id)
+    )
+    row = result.one()
+    return TokenUsageSummary(total=row[0], monthly=row[1], daily=row[2])
 
 
 def _extract_key_prefix(token: APIToken) -> str:
@@ -160,9 +215,26 @@ def _extract_key_prefix(token: APIToken) -> str:
     return "sk-ant-api03"
 
 
-def build_token_response(token: APIToken, used_usd: Decimal) -> TokenResponse:
-    """Build TokenResponse with calculated used_usd."""
+def build_token_response(
+    token: APIToken,
+    used_usd: Decimal,
+    monthly_used_usd: Decimal | None = None,
+    daily_used_usd: Decimal | None = None,
+    team_id: str | None = None,
+    team_name: str | None = None,
+    allocated_usd: Decimal | None = None,
+) -> TokenResponse:
+    """Build TokenResponse with calculated usage."""
     token.calculate_used_usd(used_usd)
+
+    effective_monthly = (
+        allocated_usd if allocated_usd is not None else token.monthly_quota_usd
+    )
+    daily_limit = None
+    if effective_monthly is not None:
+        today = datetime.utcnow().date()
+        days_in_month = calendar.monthrange(today.year, today.month)[1]
+        daily_limit = effective_monthly / Decimal(str(days_in_month))
 
     return TokenResponse(
         id=str(token.id),
@@ -170,7 +242,16 @@ def build_token_response(token: APIToken, used_usd: Decimal) -> TokenResponse:
         key_prefix=_extract_key_prefix(token),
         expires_at=token.expires_at,
         quota_usd=str(token.quota_usd) if token.quota_usd else None,
+        monthly_quota_usd=(
+            str(effective_monthly) if effective_monthly is not None else None
+        ),
+        daily_limit_usd=str(daily_limit) if daily_limit is not None else None,
+        monthly_reset_policy=token.monthly_reset_policy,
         used_usd=str(used_usd),
+        monthly_used_usd=(
+            str(monthly_used_usd) if monthly_used_usd is not None else None
+        ),
+        daily_used_usd=str(daily_used_usd) if daily_used_usd is not None else None,
         remaining_quota=str(token.remaining_quota) if token.remaining_quota else None,
         allowed_ips=token.allowed_ips or [],
         is_active=token.is_active,
@@ -179,6 +260,9 @@ def build_token_response(token: APIToken, used_usd: Decimal) -> TokenResponse:
         created_at=token.created_at,
         last_used_at=token.last_used_at,
         token_metadata=token.token_metadata,
+        team_id=team_id,
+        team_name=team_name,
+        allocated_usd=str(allocated_usd) if allocated_usd is not None else None,
     )
 
 
@@ -214,6 +298,8 @@ async def create_token(
         name=request.name,
         expires_at=request.expires_at,
         quota_usd=request.quota_usd,
+        monthly_quota_usd=request.monthly_quota_usd,
+        monthly_reset_policy=request.monthly_reset_policy,
         allowed_ips=request.allowed_ips,
         token_metadata=validated_meta,
     )
@@ -264,6 +350,8 @@ async def batch_create_tokens(
         names=names,
         expires_at=request.expires_at,
         quota_usd=request.quota_usd,
+        monthly_quota_usd=request.monthly_quota_usd,
+        monthly_reset_policy=request.monthly_reset_policy,
         allowed_ips=request.allowed_ips,
         token_metadata=validated_meta,
         model_names=request.model_names,
@@ -305,7 +393,11 @@ async def list_tokens(
     if not tokens:
         return []
 
-    # Batch query: get usage for all tokens in one query
+    # Batch query: get total, monthly, daily usage for all tokens in one query
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    day_start = datetime(now.year, now.month, now.day)
+
     token_ids = [token.id for token in tokens]
     usage_query = (
         select(
@@ -313,19 +405,70 @@ async def list_tokens(
             func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.00")).label(
                 "total_cost"
             ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (UsageRecord.created_at >= month_start, UsageRecord.cost_usd),
+                        else_=Decimal("0.00"),
+                    )
+                ),
+                Decimal("0.00"),
+            ).label("monthly_cost"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (UsageRecord.created_at >= day_start, UsageRecord.cost_usd),
+                        else_=Decimal("0.00"),
+                    )
+                ),
+                Decimal("0.00"),
+            ).label("daily_cost"),
         )
         .where(UsageRecord.token_id.in_(token_ids))
         .group_by(UsageRecord.token_id)
     )
 
     result = await db.execute(usage_query)
-    usage_map = {row.token_id: row.total_cost for row in result}
+    usage_map = {
+        row.token_id: (row.total_cost, row.monthly_cost, row.daily_cost)
+        for row in result
+    }
+
+    # Get team membership info for all tokens in one query
+    team_query = (
+        select(
+            TeamMember.token_id,
+            TeamMember.allocated_usd,
+            Team.id.label("team_id"),
+            Team.name.label("team_name"),
+        )
+        .join(Team, TeamMember.team_id == Team.id)
+        .where(TeamMember.token_id.in_(token_ids))
+    )
+    team_result = await db.execute(team_query)
+    team_map = {
+        row.token_id: (str(row.team_id), row.team_name, row.allocated_usd)
+        for row in team_result
+    }
 
     # Build responses with usage data
     token_responses = []
     for token in tokens:
-        used_usd = usage_map.get(token.id, Decimal("0.00"))
-        token_responses.append(build_token_response(token, used_usd))
+        total, monthly, daily = usage_map.get(
+            token.id, (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+        )
+        team_info = team_map.get(token.id)
+        token_responses.append(
+            build_token_response(
+                token,
+                total,
+                monthly_used_usd=monthly,
+                daily_used_usd=daily,
+                team_id=team_info[0] if team_info else None,
+                team_name=team_info[1] if team_info else None,
+                allocated_usd=team_info[2] if team_info else None,
+            )
+        )
 
     return token_responses
 
@@ -344,7 +487,6 @@ async def get_token(
 
     Returns token details (without plain token key).
     """
-    from uuid import UUID
 
     try:
         token_uuid = UUID(token_id)
@@ -369,8 +511,10 @@ async def get_token(
             detail="Access denied",
         )
 
-    used_usd = await calculate_token_used_usd(token, db)
-    return build_token_response(token, used_usd)
+    usage = await calculate_token_usage(token, db)
+    return build_token_response(
+        token, usage.total, monthly_used_usd=usage.monthly, daily_used_usd=usage.daily
+    )
 
 
 @router.put("/{token_id}", response_model=TokenResponse)
@@ -394,7 +538,6 @@ async def update_token(
 
     Returns updated token details.
     """
-    from uuid import UUID
 
     try:
         token_uuid = UUID(token_id)
@@ -432,6 +575,12 @@ async def update_token(
         token.expires_at = request.expires_at
     if request.quota_usd is not None:
         token.quota_usd = request.quota_usd
+    if request.monthly_quota_usd is not None:
+        token.monthly_quota_usd = request.monthly_quota_usd
+        if token.monthly_quota_start is None:
+            token.monthly_quota_start = datetime.utcnow()
+    if request.monthly_reset_policy is not None:
+        token.monthly_reset_policy = request.monthly_reset_policy
     if request.allowed_ips is not None:
         token.allowed_ips = request.allowed_ips
     if request.is_active is not None:
@@ -442,24 +591,12 @@ async def update_token(
     await db.commit()
     await db.refresh(token)
 
-    # For quota-only updates (like recharge), skip expensive aggregation query
-    # Frontend will refresh to get accurate used_usd
-    if request.quota_usd is not None and all(
-        v is None
-        for v in [
-            request.name,
-            request.expires_at,
-            request.allowed_ips,
-            request.is_active,
-        ]
-    ):
-        # Fast path: only quota changed
-        used_usd = Decimal("0.00")
-    else:
-        # Calculate for other updates
-        used_usd = await calculate_token_used_usd(token, db)
+    await _invalidate_token_cache(token.token_hash)
 
-    return build_token_response(token, used_usd)
+    usage = await calculate_token_usage(token, db)
+    return build_token_response(
+        token, usage.total, monthly_used_usd=usage.monthly, daily_used_usd=usage.daily
+    )
 
 
 @router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -475,7 +612,6 @@ async def delete_token(
 
     Permanently deletes the token. This action cannot be undone.
     """
-    from uuid import UUID
 
     try:
         token_uuid = UUID(token_id)
@@ -521,7 +657,6 @@ async def revoke_token(
 
     Deactivates the token. Can be reactivated later via update endpoint.
     """
-    from uuid import UUID
 
     try:
         token_uuid = UUID(token_id)
@@ -552,8 +687,10 @@ async def revoke_token(
 
     # Return updated token
     token = await token_service.get_token_by_id(token_uuid)
-    used_usd = await calculate_token_used_usd(token, db)
-    return build_token_response(token, used_usd)
+    usage = await calculate_token_usage(token, db)
+    return build_token_response(
+        token, usage.total, monthly_used_usd=usage.monthly, daily_used_usd=usage.daily
+    )
 
 
 @router.get("/{token_id}/plain", response_model=dict)
@@ -569,7 +706,6 @@ async def get_plain_token(
 
     Returns the decrypted token value for copying.
     """
-    from uuid import UUID
 
     try:
         token_uuid = UUID(token_id)
@@ -602,3 +738,97 @@ async def get_plain_token(
         )
 
     return {"token": plain_token}
+
+
+class AdjustBalanceRequest(BaseModel):
+    """Adjust token balance (debit or credit)."""
+
+    amount: Decimal
+    note: str | None = None
+
+
+class AdjustBalanceResponse(BaseModel):
+    """Response after balance adjustment."""
+
+    adjustment_id: str
+    token_id: str
+    amount: str
+    note: str | None
+    used_usd: str
+    monthly_used_usd: str | None
+    daily_used_usd: str | None
+
+
+@router.post("/{token_id}/adjust", response_model=AdjustBalanceResponse)
+async def adjust_token_balance(
+    token_id: str,
+    request: AdjustBalanceRequest,
+    current_user: User = Depends(get_current_user_from_jwt),
+    token_service: TokenService = Depends(get_token_service),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Adjust token balance by inserting an adjustment record.
+
+    - **amount**: Positive to debit (reduce balance), negative to credit (increase balance)
+    - **note**: Optional reason for the adjustment
+
+    This inserts a record into usage_records with record_type="adjustment".
+    Positive amount increases "used" (reduces remaining balance).
+    Negative amount decreases "used" (increases remaining balance).
+    """
+    if request.amount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount must be non-zero",
+        )
+
+    try:
+        token_uuid = UUID(token_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid token ID format",
+        )
+
+    token = await token_service.get_token_by_id(token_uuid)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Token not found",
+        )
+
+    if token.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    adjustment = UsageRecord(
+        id=uuid_mod.uuid4(),
+        user_id=token.user_id,
+        token_id=token.id,
+        request_id=f"adj-{uuid_mod.uuid4().hex[:16]}",
+        model="adjustment",
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        cost_usd=request.amount,
+        record_type="adjustment",
+        note=request.note,
+    )
+    db.add(adjustment)
+    await db.commit()
+
+    await _invalidate_token_cache(token.token_hash)
+
+    usage = await calculate_token_usage(token, db)
+    return AdjustBalanceResponse(
+        adjustment_id=str(adjustment.id),
+        token_id=str(token.id),
+        amount=str(request.amount),
+        note=request.note,
+        used_usd=str(usage.total),
+        monthly_used_usd=str(usage.monthly),
+        daily_used_usd=str(usage.daily),
+    )

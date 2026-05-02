@@ -334,6 +334,75 @@ class TokensTimeseriesResponse(BaseModel):
     series: List[TokenTimeseriesEntry]
 
 
+class UsageBreakdownItem(BaseModel):
+    """Single row in the token×model breakdown report."""
+
+    time_bucket: str
+    token_id: str
+    token_name: str
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    total_cost: str
+    request_count: int
+
+
+class UsageBreakdownResponse(BaseModel):
+    """Token × model breakdown report."""
+
+    granularity: str
+    start_date: str
+    end_date: str
+    data: List[UsageBreakdownItem]
+
+
+@router.get("/breakdown", response_model=UsageBreakdownResponse)
+async def get_usage_breakdown(
+    start_date: datetime,
+    end_date: datetime,
+    granularity: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    token_id: Optional[str] = None,
+    model: Optional[str] = None,
+    tz: str = Query(
+        "UTC", description="IANA timezone for date grouping, e.g. Asia/Shanghai"
+    ),
+    current_user: User = Depends(get_current_user_from_jwt),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get usage breakdown by token × model × time bucket.
+
+    Shows how many tokens and how much cost each key spent on each model,
+    grouped by daily/weekly/monthly granularity.
+
+    - **start_date / end_date**: Time range (max 90 days)
+    - **granularity**: daily, weekly, monthly
+    - **token_id**: Optional filter by single token
+    - **model**: Optional filter by model name
+    - **tz**: Timezone for date grouping
+    """
+    start_date, end_date = _clamp_date_range(start_date, end_date)
+
+    service = UsageStatsService(db)
+    data = await service.get_usage_breakdown(
+        user_id=current_user.id,
+        start_date=start_date,
+        end_date=end_date,
+        granularity=granularity,
+        token_id=UUID(token_id) if token_id else None,
+        model=model,
+        tz=tz,
+    )
+
+    return UsageBreakdownResponse(
+        granularity=granularity,
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat(),
+        data=[UsageBreakdownItem(**d) for d in data],
+    )
+
+
 @router.get("/aggregated-stats", response_model=AggregatedStatsResponse)
 async def get_aggregated_stats(
     start_date: datetime,

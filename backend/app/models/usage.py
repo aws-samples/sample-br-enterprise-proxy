@@ -49,6 +49,10 @@ class UsageRecord(Base):
     # Cost information
     cost_usd = Column(Numeric(10, 4), default=Decimal("0.0000"), nullable=False)
 
+    # Record classification: "usage" (real API call) or "adjustment" (admin debit/credit)
+    record_type = Column(String(20), nullable=False, server_default="usage")
+    note = Column(String(500), nullable=True)
+
     # Request metadata (renamed from 'metadata' to avoid SQLAlchemy reserved word)
     request_metadata = Column(JSON, nullable=True)
 

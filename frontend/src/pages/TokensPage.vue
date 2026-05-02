@@ -47,12 +47,6 @@
           flat
           bordered
         >
-          <template v-slot:body-cell-id="props">
-            <q-td :props="props">
-              <div class="text-mono text-caption">{{ props.row.id }}</div>
-            </q-td>
-          </template>
-
           <template v-slot:body-cell-name="props">
             <q-td :props="props">
               <div class="text-weight-bold">{{ props.row.name }}</div>
@@ -67,7 +61,7 @@
                   flat
                   dense
                   round
-                  size="sm"
+                  size="xs"
                   icon="content_copy"
                   color="grey-7"
                   @click="copyTokenKey(props.row)"
@@ -92,7 +86,16 @@
           <template v-slot:body-cell-quota="props">
             <q-td :props="props">
               <div v-if="props.row.quota_usd">
-                ${{ props.row.used_usd }} / ${{ props.row.quota_usd }}
+                ${{ Number(props.row.used_usd).toFixed(2) }} / ${{ Number(props.row.quota_usd).toFixed(2) }}
+                <q-linear-progress
+                  :value="getQuotaProgress(props.row)"
+                  :color="getQuotaColor(props.row)"
+                  class="q-mt-xs"
+                />
+              </div>
+              <div v-else-if="props.row.allocated_usd">
+                ${{ Number(props.row.used_usd).toFixed(2) }} / ${{ Number(props.row.allocated_usd).toFixed(2) }}
+                <span class="text-caption text-grey-6 q-ml-xs">(team)</span>
                 <q-linear-progress
                   :value="getQuotaProgress(props.row)"
                   :color="getQuotaColor(props.row)"
@@ -127,6 +130,7 @@
                 flat
                 dense
                 round
+                size="xs"
                 icon="settings"
                 color="grey-7"
                 @click="openSettings(props.row)"
@@ -138,6 +142,7 @@
                 flat
                 dense
                 round
+                size="xs"
                 icon="account_balance_wallet"
                 color="positive"
                 @click="rechargeToken(props.row)"
@@ -149,6 +154,7 @@
                 flat
                 dense
                 round
+                size="xs"
                 icon="delete"
                 color="negative"
                 @click="deleteToken(props.row)"
@@ -609,16 +615,11 @@ const newToken = ref({
 
 const columns = [
   {
-    name: 'id',
-    label: 'ID',
-    field: 'id',
-    align: 'left' as const,
-  },
-  {
     name: 'name',
     label: 'Name',
     field: 'name',
     align: 'left' as const,
+    sortable: true,
   },
   {
     name: 'key',
@@ -684,8 +685,9 @@ function getStatusLabel(token: APIToken) {
 }
 
 function getQuotaProgress(token: APIToken) {
-  if (!token.quota_usd) return 0;
-  return parseFloat(token.used_usd) / parseFloat(token.quota_usd);
+  const limit = token.quota_usd || token.allocated_usd;
+  if (!limit) return 0;
+  return parseFloat(token.used_usd) / parseFloat(limit);
 }
 
 function getQuotaColor(token: APIToken) {

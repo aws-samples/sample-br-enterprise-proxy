@@ -21,73 +21,85 @@
     <!-- Usage Statistics -->
     <q-card>
       <q-card-section>
-        <div class="row items-center justify-between q-mb-md">
+        <div class="row items-center no-wrap q-gutter-sm q-mb-md">
           <div class="text-h6">Usage Statistics</div>
-          <div class="row q-gutter-sm">
-            <div v-if="groupBy === 'token'" class="row items-center q-gutter-sm">
-              <span class="text-caption">Show Active:</span>
-              <q-toggle
-                v-model="showActiveTokens"
-                dark
-                color="primary"
-              />
-            </div>
-            <q-input
-              v-model="startDate"
-              label="Start Date"
-              outlined
-              dense
+          <q-space />
+          <div v-if="groupBy === 'token'" class="row items-center no-wrap q-gutter-xs">
+            <span class="text-caption">Active:</span>
+            <q-toggle
+              v-model="showActiveTokens"
               dark
-              type="date"
-              :min="minAllowedDate"
-              style="width: 160px"
-            />
-            <q-input
-              v-model="endDate"
-              label="End Date"
-              outlined
+              color="primary"
               dense
-              dark
-              type="date"
-              :min="minAllowedDate"
-              style="width: 160px"
-            />
-            <q-select
-              v-model="groupBy"
-              :options="groupByOptions"
-              label="Group By"
-              outlined
-              dense
-              dark
-              style="width: 150px"
-              emit-value
-              map-options
-            />
-            <q-select
-              v-if="groupBy === 'token'"
-              v-model="selectedToken"
-              :options="tokenOptions"
-              label="Filter API Key"
-              outlined
-              dense
-              dark
-              clearable
-              style="width: 200px"
-              emit-value
-              map-options
-            />
-            <q-select
-              v-if="groupBy === 'model'"
-              v-model="selectedModel"
-              :options="modelOptions"
-              label="Filter Model"
-              outlined
-              dense
-              dark
-              clearable
-              style="width: 200px"
             />
           </div>
+          <q-input
+            v-model="startDate"
+            label="Start"
+            outlined
+            dense
+            dark
+            type="date"
+            :min="minAllowedDate"
+            style="width: 150px"
+          />
+          <q-input
+            v-model="endDate"
+            label="End"
+            outlined
+            dense
+            dark
+            type="date"
+            :min="minAllowedDate"
+            style="width: 150px"
+          />
+          <q-select
+            v-model="groupBy"
+            :options="groupByOptions"
+            label="Group By"
+            outlined
+            dense
+            dark
+            style="width: 140px"
+            emit-value
+            map-options
+          />
+          <q-select
+            v-if="groupBy === 'token'"
+            v-model="selectedToken"
+            :options="tokenOptions"
+            label="API Key"
+            outlined
+            dense
+            dark
+            clearable
+            style="width: 180px"
+            emit-value
+            map-options
+          />
+          <q-select
+            v-if="groupBy === 'model'"
+            v-model="selectedModel"
+            :options="modelOptions"
+            label="Model"
+            outlined
+            dense
+            dark
+            clearable
+            style="width: 180px"
+          />
+          <q-btn
+            icon="download"
+            flat
+            dense
+            round
+            size="xs"
+            color="grey-7"
+            :loading="exporting"
+            @click="exportCsv"
+          >
+            <q-tooltip>Export CSV</q-tooltip>
+          </q-btn>
         </div>
 
         <q-table
@@ -133,9 +145,11 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useTokensStore } from 'src/stores/tokens';
 import { useDashboardStore } from 'src/stores/dashboard';
+import { api } from 'src/boot/axios';
 
 const tokensStore = useTokensStore();
 const dashboardStore = useDashboardStore();
+const exporting = ref(false);
 
 const groupBy = ref<'token' | 'model'>('token');
 const selectedToken = ref<string | null>(null);
@@ -169,7 +183,7 @@ const totalBalance = computed(() => {
     return sum + used;
   }, 0);
 
-  return (totalQuota - totalUsed).toFixed(8);
+  return (totalQuota - totalUsed).toFixed(2);
 });
 
 const tokenOptions = computed(() => [
@@ -332,8 +346,65 @@ watch([startDate, endDate], async () => {
   }
 });
 
+async function exportCsv() {
+  exporting.value = true;
+  try {
+    const params: Record<string, string> = {
+      granularity: 'daily',
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+    if (startDate.value) {
+      const start = new Date(startDate.value);
+      start.setHours(0, 0, 0, 0);
+      params.start_date = start.toISOString();
+    } else {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      params.start_date = d.toISOString();
+    }
+    if (endDate.value) {
+      const end = new Date(endDate.value);
+      end.setHours(23, 59, 59, 999);
+      params.end_date = end.toISOString();
+    } else {
+      params.end_date = new Date().toISOString();
+    }
+    if (selectedToken.value && groupBy.value === 'token') {
+      params.token_id = selectedToken.value;
+    }
+    if (selectedModel.value && groupBy.value === 'model' && selectedModel.value !== 'All') {
+      params.model = selectedModel.value;
+    }
+
+    const response = await api.get('/admin/usage/breakdown', { params });
+    const rows = response.data.data as Array<Record<string, unknown>>;
+
+    const headers = ['Date', 'API Key', 'Model', 'Prompt Tokens', 'Completion Tokens', 'Total Tokens', 'Requests', 'Cost (USD)'];
+    const csvRows = rows.map(r => [
+      r.time_bucket,
+      r.token_name,
+      r.model,
+      r.prompt_tokens,
+      r.completion_tokens,
+      r.total_tokens,
+      r.request_count,
+      r.total_cost,
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+
+    const csv = [headers.join(','), ...csvRows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `usage_${params.start_date.slice(0, 10)}_${params.end_date.slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } finally {
+    exporting.value = false;
+  }
+}
+
 onMounted(async () => {
-  // 并行加载所有数据以提高性能
   await Promise.all([
     tokensStore.fetchTokens(),
     fetchUsageByToken(),
