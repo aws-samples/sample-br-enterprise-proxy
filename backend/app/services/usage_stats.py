@@ -69,6 +69,7 @@ class UsageStatsService:
                 UsageRecord.user_id == user_id,
                 UsageRecord.created_at >= start_date,
                 UsageRecord.created_at <= end_date,
+                UsageRecord.record_type == "usage",
             )
             .group_by(time_bucket)
             .order_by(time_bucket)

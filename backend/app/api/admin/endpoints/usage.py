@@ -125,6 +125,7 @@ async def get_usage_stats(
         UsageRecord.user_id == current_user.id,
         UsageRecord.created_at >= current_month_start,
         UsageRecord.created_at <= current_month_end,
+        UsageRecord.record_type == "usage",
     )
     current_month_result = await db.execute(current_month_query)
     current_month = current_month_result.first()
@@ -136,6 +137,7 @@ async def get_usage_stats(
     ).where(
         UsageRecord.user_id == current_user.id,
         UsageRecord.created_at >= last_30_days_start,
+        UsageRecord.record_type == "usage",
     )
     last_30_days_result = await db.execute(last_30_days_query)
     last_30_days = last_30_days_result.first()
@@ -144,7 +146,10 @@ async def get_usage_stats(
     all_time_query = select(
         func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.00")).label("cost"),
         func.count(UsageRecord.id).label("requests"),
-    ).where(UsageRecord.user_id == current_user.id)
+    ).where(
+        UsageRecord.user_id == current_user.id,
+        UsageRecord.record_type == "usage",
+    )
     all_time_result = await db.execute(all_time_query)
     all_time = all_time_result.first()
 
@@ -194,6 +199,7 @@ async def get_usage_by_token(
             UsageRecord.user_id == current_user.id,
             UsageRecord.created_at >= start_date,
             UsageRecord.created_at <= end_date,
+            UsageRecord.record_type == "usage",
         )
         .group_by(
             UsageRecord.token_id,
@@ -205,7 +211,11 @@ async def get_usage_by_token(
     )
 
     if token_id:
-        query = query.where(UsageRecord.token_id == token_id)
+        try:
+            token_uuid = UUID(token_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid token_id format")
+        query = query.where(UsageRecord.token_id == token_uuid)
 
     result = await db.execute(query)
     rows = result.all()
@@ -256,6 +266,7 @@ async def get_usage_by_model(
             UsageRecord.user_id == current_user.id,
             UsageRecord.created_at >= start_date,
             UsageRecord.created_at <= end_date,
+            UsageRecord.record_type == "usage",
         )
         .group_by(UsageRecord.model)
         .order_by(func.sum(UsageRecord.cost_usd).desc())

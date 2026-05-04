@@ -226,7 +226,7 @@ async def create_chat_completion(
         bedrock_client = BedrockClient.get_instance()
 
         # Translate request
-        bedrock_request = RequestTranslator.openai_to_bedrock(request_data)
+        bedrock_request = await RequestTranslator.openai_to_bedrock(request_data)
 
         # Handle streaming
         if request_data.stream:
@@ -716,8 +716,10 @@ async def stream_chat_completion(
                     stop_reason = "tool_calls"
 
             elif event.type == "message_stop":
-                # Send final chunk with finish reason
-                finish_reason = "tool_calls" if tool_use_blocks else "stop"
+                if stop_reason:
+                    finish_reason = stop_reason
+                else:
+                    finish_reason = "tool_calls" if tool_use_blocks else "stop"
                 chunk = ResponseTranslator.create_stream_chunk(
                     request_id=request_id,
                     model=model,

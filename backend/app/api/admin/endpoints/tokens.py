@@ -37,8 +37,12 @@ async def _invalidate_token_cache(token_hash: str) -> None:
         redis_client = await get_redis()
         cache = RedisCache(redis_client)
         await cache.delete(f"token:{token_hash}")
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to invalidate token cache for %s: %s", token_hash[:8], e
+        )
 
 
 def validate_token_metadata(meta: dict | None) -> dict | None:
