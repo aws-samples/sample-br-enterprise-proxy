@@ -364,29 +364,6 @@ class TokenService:
         await self.db.commit()
         return True
 
-    async def record_usage(
-        self,
-        token_id: UUID,
-        cost_usd: Decimal,
-    ) -> bool:
-        """
-        Record token usage and update used amount.
-
-        Args:
-            token_id: Token UUID
-            cost_usd: Cost in USD to add
-
-        Returns:
-            True if successful, False if token not found
-        """
-        token = await self.get_token_by_id(token_id)
-        if not token:
-            return False
-
-        token.used_usd += cost_usd
-        await self.db.commit()
-        return True
-
     def _is_ip_allowed(self, client_ip: str, allowed_ips: List[str]) -> bool:
         """
         Check if client IP is in allowed list.

@@ -421,23 +421,16 @@ async def add_member(
         user_id=current_user.id,
     )
 
-    # Invalidate token cache
     token_result = await db.execute(
-        select(APIToken.token_hash).where(APIToken.id == token_uuid)
+        select(APIToken.token_hash, APIToken.name).where(APIToken.id == token_uuid)
     )
-    token_hash = token_result.scalar_one_or_none()
-    if token_hash:
-        await _invalidate_token_cache(token_hash)
-
-    # Get token name
-    token_result = await db.execute(
-        select(APIToken.name).where(APIToken.id == token_uuid)
-    )
-    token_name = token_result.scalar_one_or_none() or ""
+    token_row = token_result.one_or_none()
+    if token_row and token_row.token_hash:
+        await _invalidate_token_cache(token_row.token_hash)
 
     return TeamMemberSimpleResponse(
         token_id=str(member.token_id),
-        token_name=token_name,
+        token_name=token_row.name if token_row else "",
         allocated_usd=str(member.allocated_usd),
     )
 
@@ -492,22 +485,16 @@ async def adjust_member(
         user_id=current_user.id,
     )
 
-    # Invalidate cache
     token_result = await db.execute(
-        select(APIToken.token_hash).where(APIToken.id == token_uuid)
+        select(APIToken.token_hash, APIToken.name).where(APIToken.id == token_uuid)
     )
-    token_hash = token_result.scalar_one_or_none()
-    if token_hash:
-        await _invalidate_token_cache(token_hash)
-
-    token_result = await db.execute(
-        select(APIToken.name).where(APIToken.id == token_uuid)
-    )
-    token_name = token_result.scalar_one_or_none() or ""
+    token_row = token_result.one_or_none()
+    if token_row and token_row.token_hash:
+        await _invalidate_token_cache(token_row.token_hash)
 
     return TeamMemberSimpleResponse(
         token_id=str(member.token_id),
-        token_name=token_name,
+        token_name=token_row.name if token_row else "",
         allocated_usd=str(member.allocated_usd),
     )
 

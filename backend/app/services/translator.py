@@ -44,7 +44,7 @@ class RequestTranslator:
         )
 
     @staticmethod
-    def _fetch_and_encode_image(image_url: str):
+    async def _fetch_and_encode_image(image_url: str):
         """
         Fetch image from URL and encode as base64.
 
@@ -55,17 +55,15 @@ class RequestTranslator:
             BedrockContentPart with image data
         """
         import base64
-        import requests
+        import httpx
         from app.schemas.bedrock import BedrockContentPart
 
         try:
-            response = requests.get(image_url, timeout=10)
-            response.raise_for_status()
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(image_url)
+                response.raise_for_status()
 
-            # Determine media type from content-type header
             media_type = response.headers.get("content-type", "image/jpeg")
-
-            # Encode to base64
             image_data = base64.b64encode(response.content).decode("utf-8")
 
             return BedrockContentPart(
@@ -76,7 +74,7 @@ class RequestTranslator:
             raise ValueError(f"Failed to fetch image from URL: {str(e)}")
 
     @staticmethod
-    def openai_to_bedrock(request: ChatCompletionRequest) -> BedrockRequest:
+    async def openai_to_bedrock(request: ChatCompletionRequest) -> BedrockRequest:
         """
         Convert OpenAI chat completion request to Bedrock format.
 
@@ -242,7 +240,9 @@ class RequestTranslator:
                         else:
                             # URL-based image - fetch and convert to base64
                             content_parts.append(
-                                RequestTranslator._fetch_and_encode_image(image_url)
+                                await RequestTranslator._fetch_and_encode_image(
+                                    image_url
+                                )
                             )
 
                 if msg.role == "system":

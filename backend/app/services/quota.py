@@ -29,8 +29,15 @@ async def enforce_quota(token: APIToken, db: AsyncSession) -> None:
 
     has_lifetime = token.quota_usd is not None
 
-    # Determine effective monthly quota source (team or standalone)
     team_membership = await get_team_membership(token.id, db)
+
+    # Early exit: no quota of any kind
+    has_own_monthly = (
+        token.monthly_quota_usd is not None and token.monthly_quota_usd > 0
+    )
+    if not has_lifetime and not has_own_monthly and not team_membership:
+        return
+
     daily_limit_enabled = True
     if team_membership:
         effective_monthly = team_membership.allocated_usd
@@ -58,8 +65,9 @@ async def enforce_quota(token: APIToken, db: AsyncSession) -> None:
     # Determine the start boundary for the monthly sum
     monthly_boundary = rollover_start if is_rollover else month_start
 
-    result = await db.execute(
-        select(
+    if has_lifetime:
+        # Need full history for lifetime check
+        query = select(
             func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.00")).label(
                 "total"
             ),
@@ -85,11 +93,37 @@ async def enforce_quota(token: APIToken, db: AsyncSession) -> None:
                 Decimal("0.00"),
             ).label("daily"),
         ).where(UsageRecord.token_id == token.id)
-    )
-    row = result.one()
-    total_used, monthly_used, daily_used = row.total, row.monthly, row.daily
+    else:
+        # Only monthly/daily needed — scope to monthly_boundary for efficiency
+        query = select(
+            func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.00")).label(
+                "monthly"
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (UsageRecord.created_at >= day_start, UsageRecord.cost_usd),
+                        else_=Decimal("0.00"),
+                    )
+                ),
+                Decimal("0.00"),
+            ).label("daily"),
+        ).where(
+            UsageRecord.token_id == token.id,
+            UsageRecord.created_at >= monthly_boundary,
+        )
 
-    token.calculate_used_usd(total_used)
+    result = await db.execute(query)
+    row = result.one()
+
+    if has_lifetime:
+        total_used, monthly_used, daily_used = row.total, row.monthly, row.daily
+    else:
+        total_used = Decimal("0.00")
+        monthly_used, daily_used = row.monthly, row.daily
+
+    if has_lifetime:
+        token.calculate_used_usd(total_used)
 
     # 1. Lifetime quota
     if has_lifetime and total_used >= token.quota_usd:
