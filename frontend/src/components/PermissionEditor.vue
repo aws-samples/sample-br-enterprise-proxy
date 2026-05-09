@@ -19,7 +19,7 @@
         <template v-slot:option="{ itemProps, opt, selected, toggleOption }">
           <q-item v-bind="itemProps">
             <q-item-section side>
-              <q-checkbox :model-value="selected" @update:model-value="toggleOption(opt)" />
+              <q-checkbox dark :model-value="selected" @update:model-value="toggleOption(opt)" />
             </q-item-section>
             <q-item-section>
               <q-item-label>{{ opt.label }}</q-item-label>

@@ -45,8 +45,8 @@
       </template>
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
-          <q-btn flat dense icon="edit" @click="editUser(props.row)" />
-          <q-btn flat dense icon="block" color="negative" @click="deactivateUser(props.row)" v-if="props.row.role !== 'super_admin'" />
+          <q-btn flat dense round size="sm" icon="edit" @click="editUser(props.row)" />
+          <q-btn flat dense round size="sm" icon="block" color="negative" @click="deactivateUser(props.row)" v-if="props.row.role !== 'super_admin'" />
         </q-td>
       </template>
     </q-table>
