@@ -91,7 +91,7 @@ locals {
   default_database_name   = "kolyabrproxy"
   default_master_username = "postgres"
   default_engine          = "aurora-postgresql"
-  default_engine_version  = "16.6"
+  default_engine_version  = "16.11"
   default_instance_class  = var.workspace == "prod" ? "db.r6g.large" : "db.r6g.large"
 
   # Use created monitoring role if monitoring is enabled and no role ARN provided
