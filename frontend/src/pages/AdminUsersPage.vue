@@ -106,6 +106,7 @@
 import { ref, onMounted } from 'vue';
 import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
+import { extractErrorMessage } from 'src/utils/error';
 
 interface AdminUser {
   id: string;
@@ -184,10 +185,7 @@ async function submitInvite() {
     inviteForm.value = { email: '', role: 'admin', permissions: defaultPermissions() };
     await fetchUsers();
   } catch (error: unknown) {
-    const msg = error && typeof error === 'object' && 'response' in error
-      ? (error.response as { data?: { detail?: string } })?.data?.detail || 'Failed'
-      : 'Failed';
-    Notify.create({ type: 'negative', message: msg, position: 'top' });
+    Notify.create({ type: 'negative', message: extractErrorMessage(error), position: 'top' });
   } finally {
     submitting.value = false;
   }
@@ -215,10 +213,7 @@ async function submitEdit() {
     showEditDialog.value = false;
     await fetchUsers();
   } catch (error: unknown) {
-    const msg = error && typeof error === 'object' && 'response' in error
-      ? (error.response as { data?: { detail?: string } })?.data?.detail || 'Failed'
-      : 'Failed';
-    Notify.create({ type: 'negative', message: msg, position: 'top' });
+    Notify.create({ type: 'negative', message: extractErrorMessage(error), position: 'top' });
   } finally {
     submitting.value = false;
   }
@@ -231,10 +226,7 @@ async function deactivateUser(user: AdminUser) {
     Notify.create({ type: 'positive', message: 'Admin deactivated', position: 'top' });
     await fetchUsers();
   } catch (error: unknown) {
-    const msg = error && typeof error === 'object' && 'response' in error
-      ? (error.response as { data?: { detail?: string } })?.data?.detail || 'Failed'
-      : 'Failed';
-    Notify.create({ type: 'negative', message: msg, position: 'top' });
+    Notify.create({ type: 'negative', message: extractErrorMessage(error), position: 'top' });
   }
 }
 

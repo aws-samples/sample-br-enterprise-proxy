@@ -93,7 +93,10 @@ class AuditLogService:
             await self.db.refresh(audit_log)
         except Exception as e:
             logger.error(f"Failed to write audit log: {e}")
-            await self.db.rollback()
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
             return audit_log
 
         # Log to application logger for monitoring

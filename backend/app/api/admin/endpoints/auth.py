@@ -22,7 +22,7 @@ from app.core.cookies import (
 )
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_jwt_token
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.audit_log import AuditLogService
 from app.services.auth import AuthService
 from app.services.cognito_oauth import get_cognito_oauth_service
@@ -46,6 +46,21 @@ class UserResponse(BaseModel):
     permissions: dict | None
     email_verified: bool
     current_balance: str
+
+    @classmethod
+    def from_user(cls, user: User) -> "UserResponse":
+        return cls(
+            id=str(user.id),
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            is_active=user.is_active,
+            is_admin=user.is_admin,
+            role=user.role.value if user.role else "admin",
+            permissions=user.permissions,
+            email_verified=user.email_verified,
+            current_balance=str(user.current_balance),
+        )
 
     class Config:
         from_attributes = True
@@ -156,18 +171,7 @@ async def refresh_access_token(
         return LoginResponse(
             access_token=access_token,
             token_type="bearer",
-            user=UserResponse(
-                id=str(user.id),
-                email=user.email,
-                first_name=user.first_name,
-                last_name=user.last_name,
-                is_active=user.is_active,
-                is_admin=user.is_admin,
-                role=user.role.value if user.role else "admin",
-                permissions=user.permissions,
-                email_verified=user.email_verified,
-                current_balance=str(user.current_balance),
-            ),
+            user=UserResponse.from_user(user),
         )
 
     except HTTPException:
@@ -285,18 +289,7 @@ async def get_current_user_info(
 
     Requires valid JWT access token in Authorization header.
     """
-    return UserResponse(
-        id=str(current_user.id),
-        email=current_user.email,
-        first_name=current_user.first_name,
-        last_name=current_user.last_name,
-        is_active=current_user.is_active,
-        is_admin=current_user.is_admin,
-        role=current_user.role.value if current_user.role else "admin",
-        permissions=current_user.permissions,
-        email_verified=current_user.email_verified,
-        current_balance=str(current_user.current_balance),
-    )
+    return UserResponse.from_user(current_user)
 
 
 class UpdateProfileRequest(BaseModel):
@@ -329,18 +322,7 @@ async def update_profile(
     await db.commit()
     await db.refresh(current_user)
 
-    return UserResponse(
-        id=str(current_user.id),
-        email=current_user.email,
-        first_name=current_user.first_name,
-        last_name=current_user.last_name,
-        is_active=current_user.is_active,
-        is_admin=current_user.is_admin,
-        role=current_user.role.value if current_user.role else "admin",
-        permissions=current_user.permissions,
-        email_verified=current_user.email_verified,
-        current_balance=str(current_user.current_balance),
-    )
+    return UserResponse.from_user(current_user)
 
 
 @router.get("/microsoft/login")
@@ -514,8 +496,6 @@ async def microsoft_callback(
 
             settings = get_settings()
 
-            from app.models.user import UserRole
-
             user = User(
                 email=email,
                 password_hash=None,  # No password for OAuth users
@@ -572,18 +552,7 @@ async def microsoft_callback(
     return LoginResponse(
         access_token=access_token_jwt,
         token_type="bearer",
-        user=UserResponse(
-            id=str(user.id),
-            email=user.email,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            is_active=user.is_active,
-            is_admin=user.is_admin,
-            role=user.role.value if user.role else "admin",
-            permissions=user.permissions,
-            email_verified=user.email_verified,
-            current_balance=str(user.current_balance),
-        ),
+        user=UserResponse.from_user(user),
     )
 
 
@@ -759,8 +728,6 @@ async def cognito_callback(
 
         settings = get_settings()
 
-        from app.models.user import UserRole
-
         user = User(
             email=email,
             password_hash=None,  # No password for OAuth users
@@ -816,16 +783,5 @@ async def cognito_callback(
     return LoginResponse(
         access_token=access_token_jwt,
         token_type="bearer",
-        user=UserResponse(
-            id=str(user.id),
-            email=user.email,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            is_active=user.is_active,
-            is_admin=user.is_admin,
-            role=user.role.value if user.role else "admin",
-            permissions=user.permissions,
-            email_verified=user.email_verified,
-            current_balance=str(user.current_balance),
-        ),
+        user=UserResponse.from_user(user),
     )

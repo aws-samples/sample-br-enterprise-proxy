@@ -16,6 +16,8 @@ from app.services.audit_log import AuditLogService
 
 router = APIRouter()
 
+VALID_ROLES = {r.value for r in UserRole}
+
 
 class AdminUserResponse(BaseModel):
     id: str
@@ -27,6 +29,20 @@ class AdminUserResponse(BaseModel):
     is_active: bool
     created_at: str
     last_login_at: str | None
+
+    @classmethod
+    def from_user(cls, u: User) -> "AdminUserResponse":
+        return cls(
+            id=str(u.id),
+            email=u.email,
+            first_name=u.first_name,
+            last_name=u.last_name,
+            role=u.role.value,
+            permissions=u.permissions,
+            is_active=u.is_active,
+            created_at=u.created_at.isoformat(),
+            last_login_at=u.last_login_at.isoformat() if u.last_login_at else None,
+        )
 
 
 class InviteAdminRequest(BaseModel):
@@ -55,20 +71,7 @@ async def list_admin_users(
     )
     users = result.scalars().all()
 
-    return [
-        AdminUserResponse(
-            id=str(u.id),
-            email=u.email,
-            first_name=u.first_name,
-            last_name=u.last_name,
-            role=u.role.value,
-            permissions=u.permissions,
-            is_active=u.is_active,
-            created_at=u.created_at.isoformat(),
-            last_login_at=u.last_login_at.isoformat() if u.last_login_at else None,
-        )
-        for u in users
-    ]
+    return [AdminUserResponse.from_user(u) for u in users]
 
 
 @router.post("", response_model=AdminUserResponse, status_code=status.HTTP_201_CREATED)
@@ -82,23 +85,20 @@ async def invite_admin(
     Invite a new admin by email (pre-registration).
     The invited user will be activated when they first login via OAuth.
     """
-    if request.role not in ("super_admin", "admin"):
+    if request.role not in VALID_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role must be 'super_admin' or 'admin'",
+            detail=f"Role must be one of: {', '.join(VALID_ROLES)}",
         )
 
-    # Check if user already exists
-    existing = await db.execute(
-        select(User).where(User.email == request.email)
-    )
+    existing = await db.execute(select(User).where(User.email == request.email))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="User with this email already exists",
         )
 
-    role = UserRole.SUPER_ADMIN if request.role == "super_admin" else UserRole.ADMIN
+    role = UserRole(request.role)
 
     user = User(
         email=request.email,
@@ -120,42 +120,27 @@ async def invite_admin(
         details={"email": user.email, "role": request.role},
     )
 
-    return AdminUserResponse(
-        id=str(user.id),
-        email=user.email,
-        first_name=user.first_name,
-        last_name=user.last_name,
-        role=user.role.value,
-        permissions=user.permissions,
-        is_active=user.is_active,
-        created_at=user.created_at.isoformat(),
-        last_login_at=None,
-    )
+    return AdminUserResponse.from_user(user)
 
 
 @router.put("/{user_id}", response_model=AdminUserResponse)
 async def update_admin(
-    user_id: str,
+    user_id: UUID,
     request: UpdateAdminRequest,
     current_user: User = Depends(get_current_superadmin),
     audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
     """Update admin user role or permissions."""
-    try:
-        uid = UUID(user_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid user ID")
-
-    result = await db.execute(select(User).where(User.id == uid))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     if request.role is not None:
-        if request.role not in ("super_admin", "admin"):
+        if request.role not in VALID_ROLES:
             raise HTTPException(status_code=400, detail="Invalid role")
-        user.role = UserRole.SUPER_ADMIN if request.role == "super_admin" else UserRole.ADMIN
+        user.role = UserRole(request.role)
 
     if request.permissions is not None:
         user.permissions = request.permissions
@@ -174,36 +159,21 @@ async def update_admin(
         details={"email": user.email, "changes": request.model_dump(exclude_none=True)},
     )
 
-    return AdminUserResponse(
-        id=str(user.id),
-        email=user.email,
-        first_name=user.first_name,
-        last_name=user.last_name,
-        role=user.role.value,
-        permissions=user.permissions,
-        is_active=user.is_active,
-        created_at=user.created_at.isoformat(),
-        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
-    )
+    return AdminUserResponse.from_user(user)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_admin(
-    user_id: str,
+    user_id: UUID,
     current_user: User = Depends(get_current_superadmin),
     audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
     """Deactivate an admin user."""
-    try:
-        uid = UUID(user_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid user ID")
-
-    if uid == current_user.id:
+    if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
 
-    result = await db.execute(select(User).where(User.id == uid))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
