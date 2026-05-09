@@ -72,6 +72,26 @@
       </q-card>
     </q-dialog>
 
+    <!-- Invite Link Dialog -->
+    <q-dialog v-model="showInviteLinkDialog">
+      <q-card style="min-width: 450px">
+        <q-card-section>
+          <div class="text-h6">Invite Link</div>
+        </q-card-section>
+        <q-card-section>
+          <p>Share this link with the invited admin:</p>
+          <q-input :model-value="inviteLink" readonly outlined dense>
+            <template v-slot:append>
+              <q-btn flat dense icon="content_copy" @click="copyInviteLink" />
+            </template>
+          </q-input>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Close" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <!-- Edit Dialog -->
     <q-dialog v-model="showEditDialog">
       <q-card style="min-width: 550px">
@@ -128,7 +148,9 @@ const users = ref<AdminUser[]>([]);
 const loading = ref(false);
 const submitting = ref(false);
 const showInviteDialog = ref(false);
+const showInviteLinkDialog = ref(false);
 const showEditDialog = ref(false);
+const inviteLink = ref('');
 const resources = ref<Resources>({ api_keys: [], teams: [], models: [] });
 
 const roleOptions = ['super_admin', 'admin'];
@@ -205,6 +227,11 @@ async function fetchResources() {
   }
 }
 
+function copyInviteLink() {
+  void navigator.clipboard.writeText(inviteLink.value);
+  Notify.create({ type: 'positive', message: 'Link copied', position: 'top' });
+}
+
 function buildPermissionsPayload(perms: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(perms)) {
@@ -225,8 +252,9 @@ async function submitInvite() {
       payload.permissions = buildPermissionsPayload(inviteForm.value.permissions);
     }
     await api.post('/admin/users', payload);
-    Notify.create({ type: 'positive', message: 'Admin invited', position: 'top' });
     showInviteDialog.value = false;
+    inviteLink.value = `${window.location.origin}/login`;
+    showInviteLinkDialog.value = true;
     inviteForm.value = { email: '', role: 'admin', permissions: defaultPermissions() };
     await fetchUsers();
   } catch (error: unknown) {
