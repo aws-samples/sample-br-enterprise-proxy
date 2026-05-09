@@ -55,6 +55,17 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/MonitorPage.vue'),
       },
       {
+        path: 'activity',
+        name: 'activity',
+        component: () => import('pages/ActivityPage.vue'),
+      },
+      {
+        path: 'admin-users',
+        name: 'admin-users',
+        component: () => import('pages/AdminUsersPage.vue'),
+        meta: { requiresSuperAdmin: true },
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('pages/SettingsPage.vue'),

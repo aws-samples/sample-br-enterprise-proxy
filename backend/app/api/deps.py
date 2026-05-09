@@ -16,7 +16,7 @@ from app.core.database import get_db
 from app.core.log_context import set_log_context
 from app.core.security import decode_jwt_token
 from app.models.token import APIToken
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.audit_log import AuditLogService
 from app.services.auth import AuthService
 from app.services.refresh_token import RefreshTokenService
@@ -358,3 +358,43 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_current_superadmin(
+    current_user: User = Depends(get_current_user_from_jwt),
+) -> User:
+    """Require super_admin role."""
+    if not current_user.role or current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin access required",
+        )
+    return current_user
+
+
+def require_permission(permission: str):
+    """Factory that returns a dependency checking a specific permission."""
+
+    async def _check_permission(
+        current_user: User = Depends(get_current_user_from_jwt),
+    ) -> User:
+        # Super admin bypasses all checks
+        if current_user.role == UserRole.SUPER_ADMIN:
+            return current_user
+        # Admin with specific permission or legacy is_admin users
+        if current_user.role == UserRole.ADMIN or current_user.is_admin:
+            user_perms = current_user.permissions or {}
+            if not user_perms:
+                return current_user
+            if user_perms.get(permission, False):
+                return current_user
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {permission}",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    return _check_permission

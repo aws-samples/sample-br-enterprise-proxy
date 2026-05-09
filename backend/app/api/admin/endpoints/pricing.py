@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.services.pricing_updater import PricingUpdater
-from app.api.deps import get_current_user_from_jwt
+from app.api.deps import get_current_superadmin
 from app.models.user import User
 import logging
 
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.post("/update")
 async def update_pricing(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(get_current_superadmin),
 ):
     """
     Manually trigger pricing update from AWS sources.
@@ -49,7 +49,7 @@ async def get_model_pricing(
     model_id: str,
     region: str = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(get_current_superadmin),
 ):
     """
     Get pricing information for a specific model.

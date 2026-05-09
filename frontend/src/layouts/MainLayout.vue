@@ -94,50 +94,79 @@ const leftDrawerOpen = ref(false);
 
 const user = computed(() => authStore.currentUser);
 
-const menuLinks = [
+const allMenuLinks = [
   {
     title: 'Dashboard',
     caption: 'Overview and usage statistics',
     icon: 'dashboard',
     to: '/',
+    permission: null,
   },
   {
     title: 'Teams',
     caption: 'Team budget management',
     icon: 'groups',
     to: '/teams',
+    permission: 'manage_teams',
   },
   {
     title: 'API Keys',
     caption: 'API Key management',
     icon: 'vpn_key',
     to: '/tokens',
+    permission: 'manage_tokens',
   },
   {
     title: 'Models',
     caption: 'Model management',
     icon: 'psychology',
     to: '/models',
+    permission: 'manage_models',
   },
   {
     title: 'Playground',
     caption: 'Test conversations',
     icon: 'chat',
     to: '/playground',
+    permission: null,
   },
   {
     title: 'Monitor',
     caption: 'Usage charts and analytics',
     icon: 'insights',
     to: '/monitor',
+    permission: 'view_monitor',
+  },
+  {
+    title: 'Activity',
+    caption: 'Recent admin operations',
+    icon: 'history',
+    to: '/activity',
+    permission: null,
+  },
+  {
+    title: 'Admin Users',
+    caption: 'Manage admin accounts',
+    icon: 'admin_panel_settings',
+    to: '/admin-users',
+    permission: '__super_admin__',
   },
   {
     title: 'Settings',
     caption: 'Account settings',
     icon: 'settings',
     to: '/settings',
+    permission: null,
   },
 ];
+
+const menuLinks = computed(() =>
+  allMenuLinks.filter((link) => {
+    if (!link.permission) return true;
+    if (link.permission === '__super_admin__') return authStore.isSuperAdmin;
+    return authStore.hasPermission(link.permission);
+  }),
+);
 
 function toggleLeftDrawer() {
   leftDrawerOpen.value = !leftDrawerOpen.value;

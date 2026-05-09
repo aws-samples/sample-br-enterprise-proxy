@@ -5,6 +5,7 @@ import {
   createWebHashHistory,
   createWebHistory,
 } from 'vue-router';
+import { useAuthStore } from 'src/stores/auth';
 import routes from './routes';
 
 /*
@@ -36,14 +37,20 @@ export default defineRouter(function (/* { store, ssrContext } */) {
   // Navigation guard for authentication
   Router.beforeEach((to, from, next) => {
     const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+    const requiresSuperAdmin = to.matched.some((record) => record.meta.requiresSuperAdmin);
     const accessToken = localStorage.getItem('access_token');
 
     if (requiresAuth && !accessToken) {
-      // Redirect to login if route requires auth and user is not authenticated
       next('/login');
     } else if (!requiresAuth && accessToken && to.path === '/login') {
-      // Redirect to dashboard if already logged in and trying to access login
       next('/');
+    } else if (requiresSuperAdmin) {
+      const authStore = useAuthStore();
+      if (!authStore.isSuperAdmin) {
+        next('/');
+      } else {
+        next();
+      }
     } else {
       next();
     }

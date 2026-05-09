@@ -14,7 +14,9 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user_from_jwt, get_token_service
+from app.api.deps import get_audit_log_service, get_token_service, require_permission
+from app.models.audit_log import AuditAction
+from app.services.audit_log import AuditLogService
 from app.core.database import get_db
 from app.core.security import decrypt_token
 from app.models.model import Model
@@ -283,8 +285,9 @@ def build_token_response(
 )
 async def create_token(
     request: CreateTokenRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
+    audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -321,6 +324,14 @@ async def create_token(
     used_usd = Decimal("0.00")
     response = build_token_response(token, used_usd)
 
+    await audit_service.log(
+        action=AuditAction.TOKEN_CREATED,
+        user=current_user,
+        resource_type="api_token",
+        resource_id=str(token.id),
+        details={"name": token.name},
+    )
+
     return TokenWithKeyResponse(token=plain_token, **response.model_dump())
 
 
@@ -331,8 +342,9 @@ async def create_token(
 )
 async def batch_create_tokens(
     request: BatchCreateTokenRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
+    audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -381,13 +393,20 @@ async def batch_create_tokens(
         )
         created.append(TokenWithKeyResponse(token=plain_token, **resp_dict))
 
+    await audit_service.log(
+        action=AuditAction.TOKEN_CREATED,
+        user=current_user,
+        resource_type="api_token",
+        details={"names": [t.name for t, _ in results], "count": len(results)},
+    )
+
     return BatchCreateTokenResponse(created=created, total=len(created))
 
 
 @router.get("", response_model=List[TokenResponse])
 async def list_tokens(
     include_inactive: bool = False,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -501,7 +520,7 @@ async def list_tokens(
 @router.get("/{token_id}", response_model=TokenResponse)
 async def get_token(
     token_id: str,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -546,8 +565,9 @@ async def get_token(
 async def update_token(
     token_id: str,
     request: UpdateTokenRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
+    audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -620,6 +640,14 @@ async def update_token(
 
     await _invalidate_token_cache(token.token_hash)
 
+    await audit_service.log(
+        action=AuditAction.TOKEN_UPDATED,
+        user=current_user,
+        resource_type="api_token",
+        resource_id=str(token.id),
+        details={"name": token.name},
+    )
+
     usage = await calculate_token_usage(token, db)
     return build_token_response(
         token, usage.total, monthly_used_usd=usage.monthly, daily_used_usd=usage.daily
@@ -629,8 +657,9 @@ async def update_token(
 @router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_token(
     token_id: str,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
+    audit_service: AuditLogService = Depends(get_audit_log_service),
 ):
     """
     Delete (revoke) a token permanently.
@@ -664,6 +693,14 @@ async def delete_token(
 
     await _invalidate_token_cache(token.token_hash)
 
+    await audit_service.log(
+        action=AuditAction.TOKEN_DELETED,
+        user=current_user,
+        resource_type="api_token",
+        resource_id=str(token.id),
+        details={"name": token.name},
+    )
+
     # Delete token
     await token_service.delete_token(token_uuid)
 
@@ -673,7 +710,7 @@ async def delete_token(
 @router.post("/{token_id}/revoke", response_model=TokenResponse)
 async def revoke_token(
     token_id: str,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -723,7 +760,7 @@ async def revoke_token(
 @router.get("/{token_id}/plain", response_model=dict)
 async def get_plain_token(
     token_id: str,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
 ):
     """
@@ -790,7 +827,7 @@ class AdjustBalanceResponse(BaseModel):
 async def adjust_token_balance(
     token_id: str,
     request: AdjustBalanceRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_tokens")),
     token_service: TokenService = Depends(get_token_service),
     db: AsyncSession = Depends(get_db),
 ):
