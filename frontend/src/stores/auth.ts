@@ -9,6 +9,8 @@ export interface User {
   last_name: string | null;
   is_active: boolean;
   is_admin: boolean;
+  role?: 'super_admin' | 'admin';
+  permissions?: Record<string, boolean> | null;
   email_verified: boolean;
   current_balance: string;
 }
@@ -30,6 +32,14 @@ export const useAuthStore = defineStore('auth', {
     isLoggedIn: (state) => state.isAuthenticated && !!state.accessToken,
     currentUser: (state) => state.user,
     isAdmin: (state) => state.user?.is_admin || false,
+    isSuperAdmin: (state) => state.user?.role === 'super_admin',
+    hasPermission: (state) => (permission: string) => {
+      if (!state.user) return false;
+      if (state.user.role === 'super_admin') return true;
+      if (!state.user.permissions || Object.keys(state.user.permissions).length === 0)
+        return true;
+      return state.user.permissions[permission] ?? false;
+    },
   },
 
   actions: {
