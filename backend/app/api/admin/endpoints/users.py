@@ -85,12 +85,15 @@ async def list_assignable_resources(
         .where(Model.is_active.is_(True), Model.is_deleted.is_(False))
         .order_by(Model.model_name)
     )
+    # Deduplicate models by model_name (same model can belong to multiple tokens)
+    seen_models: dict[str, dict] = {}
+    for r in models_result.all():
+        if r.model_name not in seen_models:
+            seen_models[r.model_name] = {"id": str(r.id), "name": r.model_name}
     return {
         "api_keys": [{"id": str(r.id), "name": r.name} for r in tokens_result.all()],
         "teams": [{"id": str(r.id), "name": r.name} for r in teams_result.all()],
-        "models": [
-            {"id": str(r.id), "name": r.model_name} for r in models_result.all()
-        ],
+        "models": list(seen_models.values()),
     }
 
 

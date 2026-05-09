@@ -5,10 +5,10 @@
         :model-value="getDisplayValue(perm.key)"
         :options="getOptions(perm.key)"
         :label="perm.label"
+        :display-value="getDisplayText(perm.key)"
         multiple
         outlined
         dense
-        use-chips
         emit-value
         map-options
         option-value="value"
@@ -45,6 +45,8 @@ interface Resources {
   models: ResourceOption[];
 }
 
+const ALL_VALUE = '__all__';
+
 const props = defineProps<{
   modelValue: Record<string, unknown>;
   resources: Resources;
@@ -63,28 +65,64 @@ const managePermissions = [
 function getOptions(key: string): ResourceOption[] {
   const perm = managePermissions.find((p) => p.key === key);
   if (!perm) return [];
-  return props.resources[perm.resourceKey] || [];
+  const resourceList = props.resources[perm.resourceKey] || [];
+  return [{ label: 'All', value: ALL_VALUE }, ...resourceList];
 }
 
-function getAllIds(key: string): string[] {
-  return getOptions(key).map((o) => o.value);
+function getResourceIds(key: string): string[] {
+  const perm = managePermissions.find((p) => p.key === key);
+  if (!perm) return [];
+  return (props.resources[perm.resourceKey] || []).map((o) => o.value);
+}
+
+function isAll(key: string): boolean {
+  const val = props.modelValue[key];
+  return val === 'all' || val === true;
 }
 
 function getDisplayValue(key: string): string[] {
+  if (isAll(key)) return [ALL_VALUE, ...getResourceIds(key)];
   const val = props.modelValue[key];
-  if (val === 'all' || val === true) return getAllIds(key);
   if (Array.isArray(val)) return val;
   return [];
 }
 
+function getDisplayText(key: string): string {
+  if (isAll(key)) return 'All';
+  const val = props.modelValue[key];
+  if (Array.isArray(val) && val.length > 0) return `${val.length} selected`;
+  return 'None';
+}
+
 function onSelectionChange(key: string, newValues: string[]) {
-  const allIds = getAllIds(key);
-  if (newValues.length === 0) {
-    update(key, 'none');
-  } else if (newValues.length === allIds.length) {
+  const oldValues = getDisplayValue(key);
+  const hadAll = oldValues.includes(ALL_VALUE);
+  const hasAll = newValues.includes(ALL_VALUE);
+  const resourceIds = getResourceIds(key);
+
+  if (!hadAll && hasAll) {
+    // Checked "All"
     update(key, 'all');
+  } else if (hadAll && !hasAll) {
+    // Unchecked "All" — deselect everything
+    update(key, 'none');
+  } else if (hadAll && hasAll) {
+    // Had All, still has All, but toggled an individual item off
+    const withoutAll = newValues.filter((v) => v !== ALL_VALUE);
+    if (withoutAll.length < resourceIds.length) {
+      update(key, withoutAll);
+    } else {
+      update(key, 'all');
+    }
   } else {
-    update(key, newValues);
+    // No "All" involved
+    if (newValues.length === 0) {
+      update(key, 'none');
+    } else if (newValues.length === resourceIds.length) {
+      update(key, 'all');
+    } else {
+      update(key, newValues);
+    }
   }
 }
 
