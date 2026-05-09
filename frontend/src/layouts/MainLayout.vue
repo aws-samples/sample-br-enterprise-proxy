@@ -100,7 +100,6 @@ const allMenuLinks = [
     caption: 'Overview and usage statistics',
     icon: 'dashboard',
     to: '/',
-    permission: null,
   },
   {
     title: 'Teams',
@@ -128,7 +127,6 @@ const allMenuLinks = [
     caption: 'Test conversations',
     icon: 'chat',
     to: '/playground',
-    permission: null,
   },
   {
     title: 'Monitor',
@@ -142,29 +140,27 @@ const allMenuLinks = [
     caption: 'Recent admin operations',
     icon: 'history',
     to: '/activity',
-    permission: null,
   },
   {
     title: 'Admin Users',
     caption: 'Manage admin accounts',
     icon: 'admin_panel_settings',
     to: '/admin-users',
-    permission: '__super_admin__',
+    requiresSuperAdmin: true,
   },
   {
     title: 'Settings',
     caption: 'Account settings',
     icon: 'settings',
     to: '/settings',
-    permission: null,
   },
 ];
 
 const menuLinks = computed(() =>
   allMenuLinks.filter((link) => {
-    if (!link.permission) return true;
-    if (link.permission === '__super_admin__') return authStore.isSuperAdmin;
-    return authStore.hasPermission(link.permission);
+    if ('requiresSuperAdmin' in link && link.requiresSuperAdmin) return authStore.isSuperAdmin;
+    if ('permission' in link && link.permission) return authStore.hasPermission(link.permission);
+    return true;
   }),
 );
 

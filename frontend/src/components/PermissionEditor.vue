@@ -35,16 +35,8 @@
 </template>
 
 <script setup lang="ts">
-interface ResourceOption {
-  label: string;
-  value: string;
-}
-
-interface Resources {
-  api_keys: ResourceOption[];
-  teams: ResourceOption[];
-  models: ResourceOption[];
-}
+import { computed } from 'vue';
+import type { Resources } from 'src/types/permissions';
 
 const ALL_VALUE = '__all__';
 
@@ -63,17 +55,26 @@ const managePermissions = [
   { key: 'manage_models', resourceKey: 'models' as const, label: 'Manage Models' },
 ];
 
-function getOptions(key: string): ResourceOption[] {
-  const perm = managePermissions.find((p) => p.key === key);
-  if (!perm) return [];
-  const resourceList = props.resources[perm.resourceKey] || [];
-  return [{ label: 'All', value: ALL_VALUE }, ...resourceList];
+const optionsMap = computed(() =>
+  Object.fromEntries(managePermissions.map(p => [
+    p.key,
+    [{ label: 'All', value: ALL_VALUE }, ...(props.resources[p.resourceKey] || [])],
+  ]))
+);
+
+const resourceIdsMap = computed(() =>
+  Object.fromEntries(managePermissions.map(p => [
+    p.key,
+    (props.resources[p.resourceKey] || []).map(o => o.value),
+  ]))
+);
+
+function getOptions(key: string) {
+  return optionsMap.value[key] || [];
 }
 
 function getResourceIds(key: string): string[] {
-  const perm = managePermissions.find((p) => p.key === key);
-  if (!perm) return [];
-  return (props.resources[perm.resourceKey] || []).map((o) => o.value);
+  return resourceIdsMap.value[key] || [];
 }
 
 function isAll(key: string): boolean {

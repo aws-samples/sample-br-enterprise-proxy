@@ -15,6 +15,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    check_resource_scope,
     get_allowed_resource_ids,
     get_audit_log_service,
     get_token_service,
@@ -36,16 +37,6 @@ router = APIRouter()
 
 ALLOWED_METADATA_KEYS = {"prompt_cache_enabled", "prompt_cache_ttl"}
 ALLOWED_CACHE_TTL_VALUES = {"5m", "1h"}
-
-
-def _check_resource_scope(user: User, token_id: str) -> None:
-    """Raise 403 if user doesn't have access to this specific token."""
-    allowed_ids = get_allowed_resource_ids(user, "manage_api_keys")
-    if allowed_ids is not None and token_id not in allowed_ids:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to manage this API key",
-        )
 
 
 async def _invalidate_token_cache(token_hash: str) -> None:
@@ -431,7 +422,6 @@ async def list_tokens(
 
     Returns list of user's tokens (without plain token keys).
     """
-    # Scope filtering: if admin has access to specific tokens, query by IDs directly
     allowed_ids = get_allowed_resource_ids(current_user, "manage_api_keys")
     if allowed_ids is not None:
         allowed_uuids = [UUID(id_) for id_ in allowed_ids]
@@ -556,7 +546,7 @@ async def get_token(
 
     Returns token details (without plain token key).
     """
-    _check_resource_scope(current_user, token_id)
+    check_resource_scope(current_user, "manage_api_keys", token_id)
 
     try:
         token_uuid = UUID(token_id)
@@ -609,7 +599,7 @@ async def update_token(
 
     Returns updated token details.
     """
-    _check_resource_scope(current_user, token_id)
+    check_resource_scope(current_user, "manage_api_keys", token_id)
 
     try:
         token_uuid = UUID(token_id)
@@ -695,7 +685,7 @@ async def delete_token(
 
     Permanently deletes the token. This action cannot be undone.
     """
-    _check_resource_scope(current_user, token_id)
+    check_resource_scope(current_user, "manage_api_keys", token_id)
 
     try:
         token_uuid = UUID(token_id)
@@ -749,7 +739,7 @@ async def revoke_token(
 
     Deactivates the token. Can be reactivated later via update endpoint.
     """
-    _check_resource_scope(current_user, token_id)
+    check_resource_scope(current_user, "manage_api_keys", token_id)
 
     try:
         token_uuid = UUID(token_id)
@@ -799,7 +789,7 @@ async def get_plain_token(
 
     Returns the decrypted token value for copying.
     """
-    _check_resource_scope(current_user, token_id)
+    check_resource_scope(current_user, "manage_api_keys", token_id)
 
     try:
         token_uuid = UUID(token_id)
@@ -871,7 +861,7 @@ async def adjust_token_balance(
     Positive amount increases "used" (reduces remaining balance).
     Negative amount decreases "used" (increases remaining balance).
     """
-    _check_resource_scope(current_user, token_id)
+    check_resource_scope(current_user, "manage_api_keys", token_id)
 
     if request.amount == 0:
         raise HTTPException(

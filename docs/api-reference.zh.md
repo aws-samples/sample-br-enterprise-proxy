@@ -437,6 +437,42 @@ export CLAUDE_MODEL="us.anthropic.claude-sonnet-4-5-20250514-v1:0"
 Authorization: Bearer <jwt_access_token>
 ```
 
+### 权限控制（RBAC）
+
+Admin API 使用基于角色的访问控制，包含两个角色：
+
+| 角色 | 权限 |
+|------|------|
+| `super_admin` | 完全访问所有端点和资源 |
+| `admin` | 受 `permissions` 对象控制的有限访问 |
+
+Admin 用户有一个 `permissions` JSON 对象，控制其可管理的资源：
+
+| 权限 | 取值 | 控制范围 |
+|------|------|----------|
+| `manage_api_keys` | `true`/`"all"`、`[id, ...]`、`false` | API Token 增删改查 |
+| `manage_teams` | `true`/`"all"`、`[id, ...]`、`false` | 团队增删改查 |
+| `manage_models` | `true`/`"all"`、`[id, ...]`、`false` | 模型配置 |
+| `view_usage` | `true`/`false` | 用量统计 |
+| `view_monitor` | `true`/`false` | 请求监控 |
+
+- `true` 或 `"all"`：对该类型所有资源有完全访问权限
+- UUID 数组：仅可访问指定资源
+- `false` 或缺失：无权限（403）
+
+各端点所需权限：
+
+| 端点分组 | 所需权限 |
+|----------|----------|
+| `/admin/tokens/*` | `manage_api_keys` |
+| `/admin/teams/*` | `manage_teams` |
+| `/admin/models/*` | `manage_models` |
+| `/admin/usage/*` | `view_usage` |
+| `/admin/monitor/*` | `view_monitor` |
+| `/admin/users/*` | 仅 `super_admin` 角色 |
+| `/admin/audit-logs` | 仅 `super_admin` 角色 |
+| `/admin/audit-logs/activity` | 所有管理员 |
+
 ### 2.1 认证
 
 #### GET /admin/auth/microsoft/login
@@ -479,7 +515,15 @@ Authorization: Bearer <jwt_access_token>
     "first_name": "John",
     "last_name": "Doe",
     "is_active": true,
-    "is_admin": false,
+    "is_admin": true,
+    "role": "admin",
+    "permissions": {
+      "manage_api_keys": "all", // pragma: allowlist secret
+      "manage_teams": ["uuid1", "uuid2"],
+      "manage_models": true,
+      "view_usage": true,
+      "view_monitor": true
+    },
     "email_verified": true,
     "current_balance": "5.00"
   }
@@ -939,6 +983,137 @@ Authorization: Bearer <jwt_access_token>
     "login_failed": 20,
     "logout_all_devices": 5
   }
+}
+```
+
+#### GET /admin/audit-logs/activity
+
+所有管理员可见的活动动态。仅展示管理操作（Token/团队/模型/管理员的增删改），显示最近 N 天的记录。非 super_admin 用户无法看到 super_admin 的操作。
+
+| 参数 | 位置 | 类型 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `page` | query | integer | `1` | 页码（从 1 开始） |
+| `page_size` | query | integer | `50` | 每页条数（最大 100） |
+| `days` | query | integer | `7` | 回溯天数（1-30 天） |
+
+**响应**：
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "user_id": "uuid",
+      "user_email": "admin@example.com",
+      "action": "token_created",
+      "resource_type": "token",
+      "resource_id": "uuid",
+      "details": "{\"name\": \"New Token\"}",
+      "created_at": "2026-01-15T10:30:00"
+    }
+  ],
+  "total": 25,
+  "page": 1,
+  "page_size": 50,
+  "total_pages": 1
+}
+```
+
+### 2.6 管理员用户管理
+
+仅 super_admin 可用。管理管理员用户账户。
+
+#### GET /admin/users
+
+列出所有活跃的管理员用户（super_admin 和 admin 角色）。
+
+**响应**：`AdminUserResponse` 数组：
+
+```json
+[
+  {
+    "id": "uuid",
+    "email": "admin@example.com",
+    "first_name": "John",
+    "last_name": "Doe",
+    "role": "admin",
+    "permissions": {
+      "manage_api_keys": "all", // pragma: allowlist secret
+      "manage_teams": "all",
+      "manage_models": "all",
+      "view_usage": true,
+      "view_monitor": true
+    },
+    "is_active": true,
+    "created_at": "2026-01-01T00:00:00",
+    "last_login_at": "2026-01-15T10:30:00"
+  }
+]
+```
+
+#### POST /admin/users
+
+邀请新管理员。在 Cognito 中创建用户（设置临时密码），同时创建本地用户记录。
+
+**请求体**：
+
+```json
+{
+  "email": "newadmin@example.com",
+  "username": "newadmin",
+  "temp_password": "TempPass123!", // pragma: allowlist secret
+  "role": "admin",
+  "permissions": {
+    "manage_api_keys": "all", // pragma: allowlist secret
+    "manage_teams": ["team-uuid-1"],
+    "manage_models": true,
+    "view_usage": true,
+    "view_monitor": true
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 管理员邮箱 |
+| `username` | string | 是 | Cognito 登录用户名 |
+| `temp_password` | string | 是 | 临时密码（首次登录必须修改） |
+| `role` | string | 否 | `"super_admin"` 或 `"admin"`（默认: `"admin"`） |
+| `permissions` | object | 否 | 权限范围（仅 `admin` 角色需要） |
+
+**响应** (201)：`AdminUserResponse`
+
+#### PUT /admin/users/{user_id}
+
+更新管理员用户的角色或权限。
+
+**请求体**（所有字段可选）：
+
+```json
+{
+  "role": "admin",
+  "permissions": { "manage_api_keys": "all", "view_usage": true }, // pragma: allowlist secret
+  "is_active": true
+}
+```
+
+**响应**：更新后的 `AdminUserResponse`。
+
+#### DELETE /admin/users/{user_id}
+
+停用管理员用户。不能停用自己。返回 204 No Content。
+
+#### GET /admin/users/resources
+
+列出所有可分配的资源（Token、团队、模型），供权限编辑器 UI 使用。
+
+**响应**：
+
+```json
+{
+  "api_keys": [{ "id": "uuid", "name": "Token Name" }],
+  "teams": [{ "id": "uuid", "name": "Team Name" }],
+  "models": [{ "id": "model-id", "name": "model-id" }]
 }
 ```
 

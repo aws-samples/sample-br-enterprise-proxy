@@ -150,6 +150,7 @@ import { api } from 'src/boot/axios';
 
 const tokensStore = useTokensStore();
 const dashboardStore = useDashboardStore();
+const authStore = useAuthStore();
 const exporting = ref(false);
 
 const groupBy = ref<'token' | 'model'>('token');
@@ -326,6 +327,7 @@ async function fetchUsageByModel() {
 }
 
 watch(groupBy, async (newValue) => {
+  if (!authStore.hasPermission('view_usage')) return;
   if (newValue === 'token') {
     await fetchUsageByToken();
   } else {
@@ -334,12 +336,14 @@ watch(groupBy, async (newValue) => {
 });
 
 watch(selectedToken, async () => {
+  if (!authStore.hasPermission('view_usage')) return;
   if (groupBy.value === 'token') {
     await fetchUsageByToken();
   }
 });
 
 watch([startDate, endDate], async () => {
+  if (!authStore.hasPermission('view_usage')) return;
   if (groupBy.value === 'token') {
     await fetchUsageByToken();
   } else {
@@ -406,7 +410,6 @@ async function exportCsv() {
 }
 
 onMounted(async () => {
-  const authStore = useAuthStore();
   const tasks: Promise<unknown>[] = [];
   if (authStore.hasPermission('manage_api_keys')) {
     tasks.push(tokensStore.fetchTokens());

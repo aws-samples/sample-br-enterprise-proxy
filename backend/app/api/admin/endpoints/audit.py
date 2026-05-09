@@ -1,5 +1,6 @@
 """Audit log viewing endpoints."""
 
+import time
 from datetime import datetime, timedelta
 from typing import List
 from uuid import UUID
@@ -32,6 +33,21 @@ ACTIVITY_ACTIONS = [
     AuditAction.TEAM_DELETED,
     AuditAction.MODEL_UPDATED,
 ]
+
+_super_admin_cache: tuple[float, list] = (0.0, [])
+_SUPER_ADMIN_CACHE_TTL = 60
+
+
+async def _get_super_admin_ids(db: AsyncSession) -> list:
+    global _super_admin_cache
+    now = time.time()
+    if now - _super_admin_cache[0] < _SUPER_ADMIN_CACHE_TTL:
+        return _super_admin_cache[1]
+    result = await db.execute(select(User.id).where(User.role == UserRole.SUPER_ADMIN))
+    ids = [row.id for row in result]
+    _super_admin_cache = (now, ids)
+    return ids
+
 
 router = APIRouter()
 
@@ -198,12 +214,8 @@ async def list_activity(
         AuditLog.created_at >= start_date,
     ]
 
-    # Non-super_admin users cannot see super_admin operations
     if current_user.role != UserRole.SUPER_ADMIN:
-        super_admin_result = await db.execute(
-            select(User.id).where(User.role == UserRole.SUPER_ADMIN)
-        )
-        super_admin_ids = [row.id for row in super_admin_result]
+        super_admin_ids = await _get_super_admin_ids(db)
         if super_admin_ids:
             filters.append(AuditLog.user_id.notin_(super_admin_ids))
 

@@ -45,8 +45,8 @@
       </template>
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
-          <q-btn flat dense round size="sm" icon="edit" @click="editUser(props.row)" />
-          <q-btn flat dense round size="sm" icon="block" color="negative" @click="deactivateUser(props.row)" v-if="props.row.role !== 'super_admin'" />
+          <q-btn flat dense round size="xs" icon="edit" class="action-btn" @click="editUser(props.row)" />
+          <q-btn flat dense round size="xs" icon="block" color="negative" class="action-btn" @click="deactivateUser(props.row)" v-if="props.row.role !== 'super_admin'" />
         </q-td>
       </template>
     </q-table>
@@ -122,6 +122,7 @@ import { api } from 'src/boot/axios';
 import { Notify } from 'quasar';
 import { extractErrorMessage } from 'src/utils/error';
 import PermissionEditor from 'src/components/PermissionEditor.vue';
+import type { Resources } from 'src/types/permissions';
 
 interface AdminUser {
   id: string;
@@ -133,17 +134,6 @@ interface AdminUser {
   is_active: boolean;
   created_at: string;
   last_login_at: string | null;
-}
-
-interface ResourceOption {
-  label: string;
-  value: string;
-}
-
-interface Resources {
-  api_keys: ResourceOption[]; // pragma: allowlist secret
-  teams: ResourceOption[];
-  models: ResourceOption[];
 }
 
 const users = ref<AdminUser[]>([]);
@@ -324,3 +314,12 @@ onMounted(async () => {
   await Promise.all([fetchUsers(), fetchResources()]);
 });
 </script>
+
+<style scoped>
+.action-btn {
+  min-height: 24px !important;
+  min-width: 24px !important;
+  padding: 2px !important;
+  font-size: 16px !important;
+}
+</style>

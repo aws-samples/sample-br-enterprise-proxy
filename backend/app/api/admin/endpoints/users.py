@@ -1,6 +1,8 @@
 """Admin user management endpoints."""
 
+import asyncio
 import logging
+from functools import lru_cache
 from typing import List
 from uuid import UUID
 
@@ -15,7 +17,6 @@ from app.api.deps import get_audit_log_service, get_current_superadmin
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.audit_log import AuditAction
-from app.models.model import Model
 from app.models.team import Team
 from app.models.token import APIToken
 from app.models.user import User, UserRole
@@ -26,6 +27,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 VALID_ROLES = {r.value for r in UserRole}
+
+
+@lru_cache()
+def _get_cognito_client():
+    settings = get_settings()
+    return boto3.client(
+        "cognito-idp",
+        region_name=settings.COGNITO_REGION or settings.AWS_REGION,
+    )
 
 
 class AdminUserResponse(BaseModel):
@@ -76,24 +86,20 @@ async def list_assignable_resources(
     """List all resources (tokens, teams, models) for permission assignment."""
     tokens_result = await db.execute(
         select(APIToken.id, APIToken.name)
-        .where(APIToken.is_active.is_(True), APIToken.is_deleted.is_(False))
+        .where(APIToken.is_deleted.is_(False))
         .order_by(APIToken.name)
     )
     teams_result = await db.execute(select(Team.id, Team.name).order_by(Team.name))
-    models_result = await db.execute(
-        select(Model.id, Model.model_name)
-        .where(Model.is_active.is_(True), Model.is_deleted.is_(False))
-        .order_by(Model.model_name)
-    )
-    # Deduplicate models by model_name (same model can belong to multiple tokens)
-    seen_models: dict[str, dict] = {}
-    for r in models_result.all():
-        if r.model_name not in seen_models:
-            seen_models[r.model_name] = {"id": str(r.id), "name": r.model_name}
+    # Reuse the aws-available endpoint (includes Bedrock + Gemini, cached 12h)
+    from app.api.admin.endpoints.models import list_aws_available_models
+
+    aws_result = await list_aws_available_models(current_user)
+    all_models = aws_result.get("models", [])
+    models = [{"id": m["model_id"], "name": m["model_id"]} for m in all_models]
     return {
         "api_keys": [{"id": str(r.id), "name": r.name} for r in tokens_result.all()],
         "teams": [{"id": str(r.id), "name": r.name} for r in teams_result.all()],
-        "models": list(seen_models.values()),
+        "models": models,
     }
 
 
@@ -161,17 +167,14 @@ async def invite_admin(
     # Create Cognito user with temporary password
     settings = get_settings()
     if settings.COGNITO_USER_POOL_ID:
-        # Cognito with email alias doesn't allow email-format usernames
         cognito_username = request.username
         if "@" in cognito_username:
             cognito_username = cognito_username.split("@")[0]
 
+        cognito_client = _get_cognito_client()
         try:
-            cognito_client = boto3.client(
-                "cognito-idp",
-                region_name=settings.COGNITO_REGION or settings.AWS_REGION,
-            )
-            cognito_client.admin_create_user(
+            await asyncio.to_thread(
+                cognito_client.admin_create_user,
                 UserPoolId=settings.COGNITO_USER_POOL_ID,
                 Username=cognito_username,
                 TemporaryPassword=request.temp_password,
@@ -184,9 +187,9 @@ async def invite_admin(
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             if error_code == "UsernameExistsException":
-                # User already exists in Cognito, just reset password
                 try:
-                    cognito_client.admin_set_user_password(
+                    await asyncio.to_thread(
+                        cognito_client.admin_set_user_password,
                         UserPoolId=settings.COGNITO_USER_POOL_ID,
                         Username=cognito_username,
                         Password=request.temp_password,

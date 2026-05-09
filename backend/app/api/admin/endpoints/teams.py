@@ -13,6 +13,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    check_resource_scope,
     get_allowed_resource_ids,
     get_audit_log_service,
     require_permission,
@@ -128,16 +129,6 @@ class BatchCreateMembersResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
-
-
-def _check_team_scope(user: User, team_id: str) -> None:
-    """Raise 403 if user doesn't have access to this specific team."""
-    allowed_ids = get_allowed_resource_ids(user, "manage_teams")
-    if allowed_ids is not None and team_id not in allowed_ids:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to manage this team",
-        )
 
 
 async def _invalidate_token_cache(token_hash: str) -> None:
@@ -268,7 +259,7 @@ async def get_team_dashboard(
     current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:
@@ -383,7 +374,7 @@ async def update_team(
     audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:
@@ -428,7 +419,7 @@ async def delete_team(
     audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:
@@ -459,7 +450,7 @@ async def add_member(
     current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         token_uuid = UUID(request.token_id)
@@ -495,7 +486,7 @@ async def remove_member(
     current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         token_uuid = UUID(token_id)
@@ -525,7 +516,7 @@ async def adjust_member(
     current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         token_uuid = UUID(token_id)
@@ -561,7 +552,7 @@ async def transfer_allocation(
     current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         from_uuid = UUID(request.from_token_id)
@@ -608,7 +599,7 @@ async def batch_create_members(
     current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
-    _check_team_scope(current_user, team_id)
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:

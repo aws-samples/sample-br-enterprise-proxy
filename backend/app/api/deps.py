@@ -411,6 +411,7 @@ def get_allowed_resource_ids(user: User, permission: str) -> Optional[list[str]]
 
     Returns None if the user has full access ("all" or super_admin).
     Returns a list of ID strings if access is scoped.
+    Returns an empty list if access is denied.
     """
     if user.role == UserRole.SUPER_ADMIN:
         return None
@@ -422,4 +423,14 @@ def get_allowed_resource_ids(user: User, permission: str) -> Optional[list[str]]
         return None
     if isinstance(perm_value, list):
         return perm_value
-    return None
+    return []
+
+
+def check_resource_scope(user: User, permission: str, resource_id: str) -> None:
+    """Raise 403 if user doesn't have access to a specific resource."""
+    allowed_ids = get_allowed_resource_ids(user, permission)
+    if allowed_ids is not None and resource_id not in allowed_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this resource",
+        )

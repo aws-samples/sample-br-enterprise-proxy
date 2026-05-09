@@ -449,6 +449,42 @@ All Admin endpoints (except OAuth login URLs) require a JWT access token:
 Authorization: Bearer <jwt_access_token>
 ```
 
+### Authorization (RBAC)
+
+The Admin API uses role-based access control with two roles:
+
+| Role | Access |
+|------|--------|
+| `super_admin` | Full access to all endpoints and resources |
+| `admin` | Scoped access controlled by `permissions` object |
+
+Admin users have a `permissions` JSON object that controls what they can manage:
+
+| Permission | Values | Controls |
+|-----------|--------|----------|
+| `manage_api_keys` | `true`/`"all"`, `[id, ...]`, `false` | API token CRUD |
+| `manage_teams` | `true`/`"all"`, `[id, ...]`, `false` | Team CRUD |
+| `manage_models` | `true`/`"all"`, `[id, ...]`, `false` | Model configuration |
+| `view_usage` | `true`/`false` | Usage statistics |
+| `view_monitor` | `true`/`false` | Request monitor |
+
+- `true` or `"all"`: full access to all resources of that type
+- Array of UUIDs: access only to those specific resources
+- `false` or missing: no access (403)
+
+Endpoints are guarded by permission requirements:
+
+| Endpoint Group | Required Permission |
+|----------------|-------------------|
+| `/admin/tokens/*` | `manage_api_keys` |
+| `/admin/teams/*` | `manage_teams` |
+| `/admin/models/*` | `manage_models` |
+| `/admin/usage/*` | `view_usage` |
+| `/admin/monitor/*` | `view_monitor` |
+| `/admin/users/*` | `super_admin` role only |
+| `/admin/audit-logs` | `super_admin` role only |
+| `/admin/audit-logs/activity` | Any admin |
+
 ### 2.1 Authentication
 
 #### GET /admin/auth/microsoft/login
@@ -491,7 +527,15 @@ Handle Microsoft OAuth callback. Creates or links user account.
     "first_name": "John",
     "last_name": "Doe",
     "is_active": true,
-    "is_admin": false,
+    "is_admin": true,
+    "role": "admin",
+    "permissions": {
+      "manage_api_keys": "all", // pragma: allowlist secret
+      "manage_teams": ["uuid1", "uuid2"],
+      "manage_models": true,
+      "view_usage": true,
+      "view_monitor": true
+    },
     "email_verified": true,
     "current_balance": "5.00"
   }
@@ -951,6 +995,137 @@ Audit activity summary with counts by action type.
     "login_failed": 20,
     "logout_all_devices": 5
   }
+}
+```
+
+#### GET /admin/audit-logs/activity
+
+Activity feed visible to all admins. Shows only management operations (token/team/model/admin CRUD) from the last N days. Non-super_admin users cannot see actions performed by super_admins.
+
+| Parameter | In | Type | Default | Description |
+|-----------|-----|------|---------|-------------|
+| `page` | query | integer | `1` | Page number (1-based) |
+| `page_size` | query | integer | `50` | Items per page (max 100) |
+| `days` | query | integer | `7` | Lookback window (1-30 days) |
+
+**Response**:
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "user_id": "uuid",
+      "user_email": "admin@example.com",
+      "action": "token_created",
+      "resource_type": "token",
+      "resource_id": "uuid",
+      "details": "{\"name\": \"New Token\"}",
+      "created_at": "2026-01-15T10:30:00"
+    }
+  ],
+  "total": 25,
+  "page": 1,
+  "page_size": 50,
+  "total_pages": 1
+}
+```
+
+### 2.6 Admin User Management
+
+Super admin only. Manage admin user accounts.
+
+#### GET /admin/users
+
+List all active admin users (super_admin and admin roles).
+
+**Response**: Array of `AdminUserResponse`:
+
+```json
+[
+  {
+    "id": "uuid",
+    "email": "admin@example.com",
+    "first_name": "John",
+    "last_name": "Doe",
+    "role": "admin",
+    "permissions": {
+      "manage_api_keys": "all", // pragma: allowlist secret
+      "manage_teams": "all",
+      "manage_models": "all",
+      "view_usage": true,
+      "view_monitor": true
+    },
+    "is_active": true,
+    "created_at": "2026-01-01T00:00:00",
+    "last_login_at": "2026-01-15T10:30:00"
+  }
+]
+```
+
+#### POST /admin/users
+
+Invite a new admin. Creates a Cognito user with a temporary password and a local user record.
+
+**Request body**:
+
+```json
+{
+  "email": "newadmin@example.com",
+  "username": "newadmin",
+  "temp_password": "TempPass123!", // pragma: allowlist secret
+  "role": "admin",
+  "permissions": {
+    "manage_api_keys": "all", // pragma: allowlist secret
+    "manage_teams": ["team-uuid-1"],
+    "manage_models": true,
+    "view_usage": true,
+    "view_monitor": true
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `email` | string | yes | Admin email address |
+| `username` | string | yes | Cognito login username |
+| `temp_password` | string | yes | Temporary password (must change on first login) |
+| `role` | string | no | `"super_admin"` or `"admin"` (default: `"admin"`) |
+| `permissions` | object | no | Permission scope (only for `admin` role) |
+
+**Response** (201): `AdminUserResponse`
+
+#### PUT /admin/users/{user_id}
+
+Update admin user role or permissions.
+
+**Request body** (all fields optional):
+
+```json
+{
+  "role": "admin",
+  "permissions": { "manage_api_keys": "all", "view_usage": true }, // pragma: allowlist secret
+  "is_active": true
+}
+```
+
+**Response**: Updated `AdminUserResponse`.
+
+#### DELETE /admin/users/{user_id}
+
+Deactivate an admin user. Cannot deactivate yourself. Returns 204 No Content.
+
+#### GET /admin/users/resources
+
+List all assignable resources (tokens, teams, models) for the permission editor UI.
+
+**Response**:
+
+```json
+{
+  "api_keys": [{ "id": "uuid", "name": "Token Name" }],
+  "teams": [{ "id": "uuid", "name": "Team Name" }],
+  "models": [{ "id": "model-id", "name": "model-id" }]
 }
 ```
 
