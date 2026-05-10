@@ -12,7 +12,14 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user_from_jwt
+from app.api.deps import (
+    check_resource_scope,
+    get_allowed_resource_ids,
+    get_audit_log_service,
+    require_permission,
+)
+from app.models.audit_log import AuditAction
+from app.services.audit_log import AuditLogService
 from app.core.database import get_db
 from app.models.team import Team, TeamMember
 from app.models.token import APIToken
@@ -140,7 +147,8 @@ async def _invalidate_token_cache(token_hash: str) -> None:
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_team(
     request: CreateTeamRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
+    audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
     if request.monthly_reset_policy not in ("reset", "rollover"):
@@ -158,6 +166,14 @@ async def create_team(
         monthly_reset_policy=request.monthly_reset_policy,
         daily_limit_enabled=request.daily_limit_enabled,
     )
+    await audit_service.log(
+        action=AuditAction.TEAM_CREATED,
+        user=current_user,
+        resource_type="team",
+        resource_id=str(team.id),
+        details={"name": team.name},
+    )
+
     return {
         "id": str(team.id),
         "name": team.name,
@@ -170,13 +186,14 @@ async def create_team(
 
 @router.get("", response_model=List[TeamListItem])
 async def list_teams(
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
     now = datetime.utcnow()
     month_start = datetime(now.year, now.month, 1)
 
-    result = await db.execute(
+    allowed_ids = get_allowed_resource_ids(current_user, "manage_teams")
+    query = (
         select(
             Team.id,
             Team.name,
@@ -191,10 +208,15 @@ async def list_teams(
             ),
         )
         .outerjoin(TeamMember, TeamMember.team_id == Team.id)
-        .where(Team.user_id == current_user.id, Team.is_active)
+        .where(Team.is_active)
         .group_by(Team.id)
         .order_by(Team.created_at.desc())
     )
+    if allowed_ids is not None:
+        allowed_uuids = [UUID(id_) for id_ in allowed_ids]
+        query = query.where(Team.id.in_(allowed_uuids))
+
+    result = await db.execute(query)
     rows = result.all()
 
     # Get total monthly usage per team
@@ -234,9 +256,10 @@ async def list_teams(
 @router.get("/{team_id}", response_model=TeamDashboardResponse)
 async def get_team_dashboard(
     team_id: str,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:
@@ -347,9 +370,11 @@ async def get_team_dashboard(
 async def update_team(
     team_id: str,
     request: UpdateTeamRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
+    audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:
@@ -372,6 +397,14 @@ async def update_team(
         monthly_reset_policy=request.monthly_reset_policy,
         daily_limit_enabled=request.daily_limit_enabled,
     )
+    await audit_service.log(
+        action=AuditAction.TEAM_UPDATED,
+        user=current_user,
+        resource_type="team",
+        resource_id=str(team.id),
+        details={"name": team.name},
+    )
+
     return {
         "id": str(team.id),
         "name": team.name,
@@ -382,9 +415,11 @@ async def update_team(
 @router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_team(
     team_id: str,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
+    audit_service: AuditLogService = Depends(get_audit_log_service),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:
@@ -392,6 +427,14 @@ async def delete_team(
 
     service = TeamService(db)
     await service.delete_team(team_uuid, current_user.id)
+
+    await audit_service.log(
+        action=AuditAction.TEAM_DELETED,
+        user=current_user,
+        resource_type="team",
+        resource_id=team_id,
+    )
+
     return None
 
 
@@ -404,9 +447,10 @@ async def delete_team(
 async def add_member(
     team_id: str,
     request: AddMemberRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         token_uuid = UUID(request.token_id)
@@ -439,9 +483,10 @@ async def add_member(
 async def remove_member(
     team_id: str,
     token_id: str,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         token_uuid = UUID(token_id)
@@ -468,9 +513,10 @@ async def adjust_member(
     team_id: str,
     token_id: str,
     request: AdjustMemberRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         token_uuid = UUID(token_id)
@@ -503,9 +549,10 @@ async def adjust_member(
 async def transfer_allocation(
     team_id: str,
     request: TransferAllocationRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
         from_uuid = UUID(request.from_token_id)
@@ -549,9 +596,10 @@ async def transfer_allocation(
 async def batch_create_members(
     team_id: str,
     request: BatchCreateMembersRequest,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("manage_teams")),
     db: AsyncSession = Depends(get_db),
 ):
+    check_resource_scope(current_user, "manage_teams", team_id)
     try:
         team_uuid = UUID(team_id)
     except ValueError:

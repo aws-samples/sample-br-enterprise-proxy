@@ -12,6 +12,7 @@ from app.api.admin.endpoints import (
     teams,
     tokens,
     usage,
+    users,
     pricing,
     monitor,
     observability,
@@ -48,8 +49,8 @@ admin_router.include_router(
     observability.router, prefix="/observability", tags=["admin-observability"]
 )
 
-# TODO: Add more admin endpoints
-# admin_router.include_router(users.router, prefix="/users", tags=["admin-users"])
+# Admin user management (super_admin only)
+admin_router.include_router(users.router, prefix="/users", tags=["admin-users"])
 
 
 @admin_router.get("/")

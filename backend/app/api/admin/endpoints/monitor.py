@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
-from app.api.deps import get_current_user_from_jwt
+from app.api.deps import require_permission
 from app.models.user import User
 from app.models.model_pricing import ModelPricing as ModelPricingModel
 from typing import List, Dict, Any, Optional
@@ -65,7 +65,7 @@ async def _fetch_pricing_table(db: AsyncSession) -> List[Dict[str, Any]]:
 async def get_pricing_table(
     force_refresh: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_monitor")),
 ):
     """
     Get complete pricing table for all models and regions.
@@ -118,7 +118,7 @@ async def get_pricing_table(
 @router.get("/pricing-summary")
 async def get_pricing_summary(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_monitor")),
 ):
     """
     Get pricing summary statistics.
@@ -160,7 +160,7 @@ async def get_pricing_summary(
 
 @router.post("/clear-cache")
 async def clear_pricing_cache(
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_monitor")),
 ):
     """
     Clear the pricing table cache.

@@ -43,6 +43,20 @@ class AuditAction(enum.Enum):
     PASSWORD_CHANGED = "password_changed"  # pragma: allowlist secret  # nosemgrep
     EMAIL_VERIFIED = "email_verified"
 
+    # Admin Management
+    ADMIN_CREATED = "admin_created"
+    ADMIN_UPDATED = "admin_updated"
+    ADMIN_DELETED = "admin_deleted"
+
+    # Resource Operations
+    TOKEN_CREATED = "token_created"
+    TOKEN_UPDATED = "token_updated"
+    TOKEN_DELETED = "token_deleted"
+    TEAM_CREATED = "team_created"
+    TEAM_UPDATED = "team_updated"
+    TEAM_DELETED = "team_deleted"
+    MODEL_UPDATED = "model_updated"
+
     # Authorization
     UNAUTHORIZED_ACCESS_ATTEMPT = "unauthorized_access_attempt"
     PERMISSION_DENIED = "permission_denied"

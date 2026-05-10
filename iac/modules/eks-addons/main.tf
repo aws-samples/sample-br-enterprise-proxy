@@ -98,6 +98,14 @@ resource "aws_iam_policy" "backend_bedrock" {
           "bedrock:*"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminSetUserPassword"
+        ]
+        Resource = "*"
       }
     ]
   })

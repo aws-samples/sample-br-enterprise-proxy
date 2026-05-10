@@ -87,9 +87,17 @@ class AuditLogService:
             created_at=datetime.utcnow(),
         )
 
-        self.db.add(audit_log)
-        await self.db.commit()
-        await self.db.refresh(audit_log)
+        try:
+            self.db.add(audit_log)
+            await self.db.commit()
+            await self.db.refresh(audit_log)
+        except Exception as e:
+            logger.error(f"Failed to write audit log: {e}")
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+            return audit_log
 
         # Log to application logger for monitoring
         log_level = logging.INFO if success else logging.WARNING

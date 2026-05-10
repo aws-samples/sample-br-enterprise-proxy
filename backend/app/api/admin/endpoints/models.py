@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user_from_jwt
+from app.api.deps import require_permission
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.model import Model
@@ -96,7 +96,7 @@ def _get_model_id_from_cache(model_name: str) -> Optional[str]:
 
 @router.get("/aws-available")
 async def list_aws_available_models(
-    _current_user=Depends(get_current_user_from_jwt),
+    _current_user=Depends(require_permission("manage_models")),
 ):
     """
     Get list of available Bedrock models from AWS (for selection).
@@ -181,7 +181,7 @@ async def list_aws_available_models(
 async def list_enabled_models(
     token_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(get_current_user_from_jwt),
+    _current_user=Depends(require_permission("manage_models")),
 ):
     """
     Get list of enabled models from PostgreSQL.
@@ -269,7 +269,7 @@ async def list_enabled_models(
 async def add_model(
     request: AddModelRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(get_current_user_from_jwt),
+    _current_user=Depends(require_permission("manage_models")),
 ):
     """
     Add a model to enabled list for a specific token.
@@ -338,7 +338,7 @@ async def add_model(
 async def delete_model(
     model_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(get_current_user_from_jwt),
+    _current_user=Depends(require_permission("manage_models")),
 ):
     """
     Delete (deactivate) a model from enabled list.

@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user_from_jwt
+from app.api.deps import get_current_superadmin
 from app.core.config import get_settings
 from app.core.config_sync import publish_config_change
 from app.core.json_formatter import set_log_level
@@ -42,7 +42,7 @@ class ObservabilityUpdate(BaseModel):
 
 @router.get("")
 async def get_observability_config(
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(get_current_superadmin),
 ):
     """Get current observability configuration."""
     settings = get_settings()
@@ -60,7 +60,7 @@ async def get_observability_config(
 @router.put("")
 async def update_observability_config(
     update: ObservabilityUpdate,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(get_current_superadmin),
 ):
     """Update observability settings at runtime (no restart required).
 

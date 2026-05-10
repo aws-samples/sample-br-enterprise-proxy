@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Numeric, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, Numeric, String, JSON
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import relationship
 
@@ -18,6 +18,13 @@ class AuthMethod(enum.Enum):
     LOCAL = "local"  # Local password authentication
     MICROSOFT = "microsoft"  # Microsoft OAuth
     COGNITO = "cognito"  # AWS Cognito
+
+
+class UserRole(enum.Enum):
+    """User role enum for RBAC."""
+
+    SUPER_ADMIN = "super_admin"
+    ADMIN = "admin"
 
 
 class User(Base):
@@ -33,6 +40,13 @@ class User(Base):
     )
     is_active = Column(Boolean, default=True, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
+    role = Column(
+        Enum(UserRole, values_callable=lambda x: [e.value for e in x]),
+        default=UserRole.ADMIN,
+        nullable=False,
+        index=True,
+    )
+    permissions = Column(JSON, nullable=True)
     email_verified = Column(Boolean, default=False, nullable=False)
 
     # Balance and credits

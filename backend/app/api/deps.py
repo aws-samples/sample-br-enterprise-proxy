@@ -16,7 +16,7 @@ from app.core.database import get_db
 from app.core.log_context import set_log_context
 from app.core.security import decode_jwt_token
 from app.models.token import APIToken
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.audit_log import AuditLogService
 from app.services.auth import AuthService
 from app.services.refresh_token import RefreshTokenService
@@ -358,3 +358,79 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_current_superadmin(
+    current_user: User = Depends(get_current_user_from_jwt),
+) -> User:
+    """Require super_admin role."""
+    if not current_user.role or current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin access required",
+        )
+    return current_user
+
+
+def require_permission(permission: str):
+    """Factory that returns a dependency checking a specific permission.
+
+    Permission values in the user's permissions JSON can be:
+    - true / "all": full access to all resources of this type
+    - list of IDs: access only to those specific resources
+    - false / missing: no access
+    """
+
+    async def _check_permission(
+        current_user: User = Depends(get_current_user_from_jwt),
+    ) -> User:
+        if current_user.role == UserRole.SUPER_ADMIN:
+            return current_user
+        if current_user.role == UserRole.ADMIN or current_user.is_admin:
+            user_perms = current_user.permissions or {}
+            if not user_perms:
+                return current_user
+            perm_value = user_perms.get(permission)
+            if perm_value is None or perm_value is False:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Permission denied: {permission}",
+                )
+            # true, "all", or a list of IDs all grant access
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    return _check_permission
+
+
+def get_allowed_resource_ids(user: User, permission: str) -> Optional[list[str]]:
+    """Get the list of resource IDs the user is allowed to manage.
+
+    Returns None if the user has full access ("all" or super_admin).
+    Returns a list of ID strings if access is scoped.
+    Returns an empty list if access is denied.
+    """
+    if user.role == UserRole.SUPER_ADMIN:
+        return None
+    user_perms = user.permissions or {}
+    if not user_perms:
+        return None
+    perm_value = user_perms.get(permission)
+    if perm_value is True or perm_value == "all":
+        return None
+    if isinstance(perm_value, list):
+        return perm_value
+    return []
+
+
+def check_resource_scope(user: User, permission: str, resource_id: str) -> None:
+    """Raise 403 if user doesn't have access to a specific resource."""
+    allowed_ids = get_allowed_resource_ids(user, permission)
+    if allowed_ids is not None and resource_id not in allowed_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this resource",
+        )

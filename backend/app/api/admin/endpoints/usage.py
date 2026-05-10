@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user_from_jwt
+from app.api.deps import require_permission
 from app.core.database import get_db
 from app.models.token import APIToken
 from app.models.usage import UsageRecord
@@ -94,7 +94,7 @@ class UsageByModelResponse(BaseModel):
 
 @router.get("/stats", response_model=UsageStatsResponse)
 async def get_usage_stats(
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_usage")),
     db: AsyncSession = Depends(get_db),
     start_date: datetime | None = None,
     end_date: datetime | None = None,
@@ -166,7 +166,7 @@ async def get_usage_stats(
 
 @router.get("/by-token", response_model=list[UsageByTokenResponse])
 async def get_usage_by_token(
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_usage")),
     db: AsyncSession = Depends(get_db),
     token_id: str | None = None,
     start_date: datetime | None = None,
@@ -237,7 +237,7 @@ async def get_usage_by_token(
 
 @router.get("/by-model", response_model=list[UsageByModelResponse])
 async def get_usage_by_model(
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_usage")),
     db: AsyncSession = Depends(get_db),
     model: str | None = None,
     start_date: datetime | None = None,
@@ -378,7 +378,7 @@ async def get_usage_breakdown(
     tz: str = Query(
         "UTC", description="IANA timezone for date grouping, e.g. Asia/Shanghai"
     ),
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_usage")),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -424,7 +424,7 @@ async def get_aggregated_stats(
     tz: str = Query(
         "UTC", description="IANA timezone for date grouping, e.g. Asia/Shanghai"
     ),
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_usage")),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -469,7 +469,7 @@ async def get_aggregated_stats(
 async def get_token_summary(
     start_date: datetime,
     end_date: datetime,
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_usage")),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -500,7 +500,7 @@ async def get_tokens_timeseries(
     tz: str = Query(
         "UTC", description="IANA timezone for date grouping, e.g. Asia/Shanghai"
     ),
-    current_user: User = Depends(get_current_user_from_jwt),
+    current_user: User = Depends(require_permission("view_usage")),
     db: AsyncSession = Depends(get_db),
 ):
     """
