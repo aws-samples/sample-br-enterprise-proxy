@@ -216,11 +216,14 @@ All models use UUID primary keys and are defined in `backend/app/models/`. Relat
 ```mermaid
 erDiagram
     User ||--o{ APIToken : "owns"
+    User ||--o{ Team : "owns"
     User ||--o{ UsageRecord : "generates"
     User ||--o{ RefreshToken : "has"
     User ||--o{ AuditLog : "triggers"
     APIToken ||--o{ UsageRecord : "tracks"
     APIToken ||--o{ Model : "enables"
+    APIToken ||--o| TeamMember : "belongs to"
+    Team ||--o{ TeamMember : "has"
     RefreshToken ||--o{ RefreshToken : "parent-child"
 
     User {
@@ -228,6 +231,8 @@ erDiagram
         string email UK
         string password_hash "nullable (unused, OAuth-only)"
         enum auth_method "MICROSOFT | COGNITO"
+        enum role "super_admin | admin"
+        json permissions "nullable, RBAC scopes"
         boolean is_active
         boolean is_admin
         boolean email_verified
@@ -244,10 +249,13 @@ erDiagram
         uuid id PK
         uuid user_id FK
         string name
+        string description "nullable"
         string token_hash UK "SHA256"
         string encrypted_token "Fernet AES-128"
         datetime expires_at "nullable"
         decimal quota_usd "Numeric(10,2) nullable"
+        decimal monthly_quota_usd "Numeric(10,2) nullable"
+        datetime monthly_quota_start "nullable"
         string_array allowed_ips "nullable"
         boolean is_active
         boolean is_deleted
@@ -314,6 +322,28 @@ erDiagram
         string user_agent
     }
 
+    Team {
+        uuid id PK
+        uuid user_id FK
+        string name
+        decimal monthly_budget_usd "Numeric(10,2)"
+        string monthly_reset_policy "reset | rollover"
+        boolean daily_limit_enabled
+        datetime monthly_budget_start
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+    }
+
+    TeamMember {
+        uuid id PK
+        uuid team_id FK "CASCADE"
+        uuid token_id FK "CASCADE, UNIQUE"
+        decimal allocated_usd "Numeric(10,2)"
+        datetime created_at
+        datetime updated_at
+    }
+
     OAuthState {
         uuid id PK
         string state UK
@@ -337,8 +367,10 @@ erDiagram
 ### Key Model Notes
 
 - **User.auth_method**: Enum with values `MICROSOFT`, `COGNITO`. All users authenticate via OAuth and have `password_hash = NULL`.
-- **APIToken**: Stores both `token_hash` (SHA256, for lookup) and `encrypted_token` (Fernet AES, for recovery). The `quota_usd` field limits total spending per token. Model access is controlled via the related `Model` table rather than an array column.
+- **User.role / permissions**: RBAC system with `super_admin` (full access) and `admin` (scoped access). The `permissions` JSON field controls per-resource access: `"all"`, a list of resource UUIDs, or `null` (no access).
+- **APIToken**: Stores both `token_hash` (SHA256, for lookup) and `encrypted_token` (Fernet AES, for recovery). The `quota_usd` field limits total spending; `monthly_quota_usd` provides a recurring monthly budget. Model access is controlled via the related `Model` table rather than an array column.
 - **Model**: Each row links one Bedrock model name to one APIToken. A token can access only models with `is_active=True` and `is_deleted=False`.
+- **Team / TeamMember**: Teams group tokens under a shared monthly budget. Each token can belong to at most one team (UNIQUE constraint on `team_members.token_id`). The team's budget is divided among members via `allocated_usd`. Daily limits are auto-calculated from the monthly allocation.
 - **RefreshToken.family_id**: Groups related tokens for theft detection. If a revoked token is reused, the entire family is revoked.
 
 ---
@@ -354,10 +386,13 @@ graph TD
         CognitoCallback["CognitoCallbackPage"]
         MSCallback["MicrosoftCallbackPage"]
         Dashboard["DashboardPage"]
+        Teams["TeamsPage"]
         Tokens["TokensPage"]
         Models["ModelsPage"]
         Playground["PlaygroundPage"]
         Monitor["MonitorPage"]
+        Activity["ActivityPage"]
+        AdminUsers["AdminUsersPage"]
         Settings["SettingsPage"]
         NotFound["ErrorNotFound"]
     end
@@ -369,6 +404,7 @@ graph TD
     subgraph Stores ["Pinia Stores (src/stores/)"]
         AuthStore["auth.ts<br/>OAuth redirect, logout, JWT mgmt"]
         TokenStore["tokens.ts<br/>API key CRUD"]
+        TeamStore["teams.ts<br/>team budget management"]
         ModelStore["models.ts<br/>model management"]
         DashStore["dashboard.ts<br/>usage overview stats"]
         MonitorStore["monitor.ts<br/>usage charts & analytics"]
@@ -388,10 +424,13 @@ graph TD
     Router -->|"requiresAuth: false"| MSCallback
 
     MainLayout --> Dashboard
+    MainLayout --> Teams
     MainLayout --> Tokens
     MainLayout --> Models
     MainLayout --> Playground
     MainLayout --> Monitor
+    MainLayout --> Activity
+    MainLayout --> AdminUsers
     MainLayout --> Settings
 
     Pages --> Stores
@@ -407,15 +446,18 @@ graph TD
 | `/auth/cognito/callback` | CognitoCallbackPage | No | Cognito OAuth callback |
 | `/auth/microsoft/callback` | MicrosoftCallbackPage | No | Microsoft OAuth callback |
 | `/` | DashboardPage | Yes | Overview, usage stats |
+| `/teams` | TeamsPage | Yes | Team budget management |
 | `/tokens` | TokensPage | Yes | API key management |
 | `/models` | ModelsPage | Yes | Model configuration |
 | `/playground` | PlaygroundPage | Yes | Test conversations |
 | `/monitor` | MonitorPage | Yes | Usage charts & analytics |
+| `/activity` | ActivityPage | Yes | Management activity feed |
+| `/admin-users` | AdminUsersPage | Yes | Admin user management (super_admin only) |
 | `/settings` | SettingsPage | Yes | Account settings |
 
 ### Sidebar Navigation
 
-The `MainLayout.vue` renders a persistent left drawer with these menu items: Dashboard, API Keys, Models, Playground, Monitor, Settings. The header shows the app title and a user menu (email, balance, settings, logout).
+The `MainLayout.vue` renders a persistent left drawer with these menu items: Dashboard, Teams, API Keys, Models, Playground, Monitor, Activity, Admin Users (super_admin only), Settings. The header shows the app title and a user menu (email, balance, settings, logout).
 
 ---
 
@@ -483,7 +525,7 @@ Secrets are stored in **AWS Secrets Manager** and automatically synced to Kubern
 
 ### Redis for Distributed Rate Limiting
 
-A **Redis standalone** instance runs in the `kbp` (kolya-br-proxy) namespace to provide distributed rate limiting across all backend Pods.
+A **Redis standalone** instance runs in the `kbp` (sample-br-enterprise-proxy) namespace to provide distributed rate limiting across all backend Pods.
 
 | Aspect | Details |
 |---|---|
@@ -924,11 +966,24 @@ total_cost  = $0.0025 + $0.00625 = $0.00875
 
 ### 8.4 Token Quota System
 
-Each API token (`APIToken.quota_usd`) can have an optional spending limit. The quota check happens at the beginning of each request:
+Tokens support two levels of spending limits:
 
-1. Query `SUM(cost_usd)` from `usage_records` for the token
-2. Compare against `quota_usd`
-3. If `total_used >= quota_usd`, return **HTTP 429** with message: `Token quota exceeded. Used: $X.XX, Quota: $Y.YY`
+| Quota Type | Field | Scope | Behavior |
+|---|---|---|---|
+| Total quota | `quota_usd` | Lifetime of the token | Hard cap on total spend |
+| Monthly quota | `monthly_quota_usd` | Resets monthly | Controlled by `monthly_reset_policy` |
+
+**Monthly reset policies:**
+- `reset` — usage counter resets to zero at the start of each calendar month
+- `rollover` — unused balance carries forward (tracked via `monthly_quota_start`)
+
+The quota check happens at the beginning of each request:
+
+1. Query `SUM(cost_usd)` from `usage_records` for the token (total and monthly windows)
+2. Compare against `quota_usd` and `monthly_quota_usd`
+3. If either limit is exceeded, return **HTTP 429** with message: `Token quota exceeded. Used: $X.XX, Quota: $Y.YY`
+
+**Team quotas** add a third layer: when a token belongs to a team, its `allocated_usd` from the team budget acts as an additional monthly cap. Daily limits are auto-calculated as `allocated_usd / days_in_month`.
 
 Usage recording is performed **asynchronously** via `BackgroundTaskManager` to avoid blocking the response to the client. The cost is calculated using `ModelPricing.calculate_cost()` with a fallback to Claude 3.5 Sonnet pricing if the model is not found in the pricing table.
 

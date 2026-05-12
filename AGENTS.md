@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus MCP
 
-This project is indexed by GitNexus as **kolya-br-proxy** (750 symbols, 1646 relationships, 49 execution flows).
+This project is indexed by GitNexus as **sample-br-enterprise-proxy** (750 symbols, 1646 relationships, 49 execution flows).
 
 ## Always Start Here
 

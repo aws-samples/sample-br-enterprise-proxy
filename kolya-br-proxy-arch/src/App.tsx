@@ -1922,7 +1922,7 @@ export default function App() {
 
         {/* Header */}
         <div style={{ marginBottom: 4 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: COLORS.text, margin: 0 }}>kolya-br-proxy</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: COLORS.text, margin: 0 }}>BR Enterprise Proxy</h1>
           <p style={{ color: COLORS.textMuted, fontSize: 12, margin: "3px 0 0" }}>
             AI Gateway — OpenAI-compatible proxy for AWS Bedrock models (Claude, Nova, DeepSeek, etc.)
           </p>
