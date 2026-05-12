@@ -216,14 +216,11 @@ async def lifespan(app: FastAPI):
 ```mermaid
 erDiagram
     User ||--o{ APIToken : "owns"
-    User ||--o{ Team : "owns"
     User ||--o{ UsageRecord : "generates"
     User ||--o{ RefreshToken : "has"
     User ||--o{ AuditLog : "triggers"
     APIToken ||--o{ UsageRecord : "tracks"
     APIToken ||--o{ Model : "enables"
-    APIToken ||--o| TeamMember : "belongs to"
-    Team ||--o{ TeamMember : "has"
     RefreshToken ||--o{ RefreshToken : "parent-child"
 
     User {
@@ -231,8 +228,6 @@ erDiagram
         string email UK
         string password_hash "nullable (unused, OAuth-only)"
         enum auth_method "MICROSOFT | COGNITO"
-        enum role "super_admin | admin"
-        json permissions "nullable, RBAC 权限范围"
         boolean is_active
         boolean is_admin
         boolean email_verified
@@ -249,13 +244,10 @@ erDiagram
         uuid id PK
         uuid user_id FK
         string name
-        string description "nullable"
         string token_hash UK "SHA256"
         string encrypted_token "Fernet AES-128"
         datetime expires_at "nullable"
         decimal quota_usd "Numeric(10,2) nullable"
-        decimal monthly_quota_usd "Numeric(10,2) nullable"
-        datetime monthly_quota_start "nullable"
         string_array allowed_ips "nullable"
         boolean is_active
         boolean is_deleted
@@ -322,28 +314,6 @@ erDiagram
         string user_agent
     }
 
-    Team {
-        uuid id PK
-        uuid user_id FK
-        string name
-        decimal monthly_budget_usd "Numeric(10,2)"
-        string monthly_reset_policy "reset | rollover"
-        boolean daily_limit_enabled
-        datetime monthly_budget_start
-        boolean is_active
-        datetime created_at
-        datetime updated_at
-    }
-
-    TeamMember {
-        uuid id PK
-        uuid team_id FK "CASCADE"
-        uuid token_id FK "CASCADE, UNIQUE"
-        decimal allocated_usd "Numeric(10,2)"
-        datetime created_at
-        datetime updated_at
-    }
-
     OAuthState {
         uuid id PK
         string state UK
@@ -367,10 +337,8 @@ erDiagram
 ### 关键模型说明
 
 - **User.auth_method**：枚举值包括 `MICROSOFT`、`COGNITO`。所有用户通过 OAuth 认证，`password_hash` 为 NULL。
-- **User.role / permissions**：RBAC 系统，包含 `super_admin`（完全访问）和 `admin`（受限访问）两种角色。`permissions` JSON 字段控制资源级别的访问权限：`"all"`、资源 UUID 列表或 `null`（无权限）。
-- **APIToken**：同时存储 `token_hash`（SHA256，用于查找）和 `encrypted_token`（Fernet AES，用于恢复）。`quota_usd` 字段限制总消费；`monthly_quota_usd` 提供按月循环的预算。模型访问通过关联的 `Model` 表控制，而非数组列。
+- **APIToken**：同时存储 `token_hash`（SHA256，用于查找）和 `encrypted_token`（Fernet AES，用于恢复）。`quota_usd` 字段限制每个令牌的总消费。模型访问通过关联的 `Model` 表控制，而非数组列。
 - **Model**：每行将一个 Bedrock 模型名称关联到一个 APIToken。令牌只能访问 `is_active=True` 且 `is_deleted=False` 的模型。
-- **Team / TeamMember**：团队将令牌归组在共享的月度预算下。每个令牌最多属于一个团队（`team_members.token_id` 有 UNIQUE 约束）。团队预算通过 `allocated_usd` 分配给各成员。每日限额从月度分配自动计算。
 - **RefreshToken.family_id**：将相关令牌分组用于盗用检测。如果已撤销的令牌被重用，整个族群将被撤销。
 
 ---
@@ -386,13 +354,10 @@ graph TD
         CognitoCallback["CognitoCallbackPage"]
         MSCallback["MicrosoftCallbackPage"]
         Dashboard["DashboardPage"]
-        Teams["TeamsPage"]
         Tokens["TokensPage"]
         Models["ModelsPage"]
         Playground["PlaygroundPage"]
         Monitor["MonitorPage"]
-        Activity["ActivityPage"]
-        AdminUsers["AdminUsersPage"]
         Settings["SettingsPage"]
         NotFound["ErrorNotFound"]
     end
@@ -404,7 +369,6 @@ graph TD
     subgraph Stores ["Pinia Stores (src/stores/)"]
         AuthStore["auth.ts<br/>OAuth redirect, logout, JWT mgmt"]
         TokenStore["tokens.ts<br/>API key CRUD"]
-        TeamStore["teams.ts<br/>team budget management"]
         ModelStore["models.ts<br/>model management"]
         DashStore["dashboard.ts<br/>usage overview stats"]
         MonitorStore["monitor.ts<br/>usage charts & analytics"]
@@ -424,13 +388,10 @@ graph TD
     Router -->|"requiresAuth: false"| MSCallback
 
     MainLayout --> Dashboard
-    MainLayout --> Teams
     MainLayout --> Tokens
     MainLayout --> Models
     MainLayout --> Playground
     MainLayout --> Monitor
-    MainLayout --> Activity
-    MainLayout --> AdminUsers
     MainLayout --> Settings
 
     Pages --> Stores
@@ -446,18 +407,15 @@ graph TD
 | `/auth/cognito/callback` | CognitoCallbackPage | 否 | Cognito OAuth 回调 |
 | `/auth/microsoft/callback` | MicrosoftCallbackPage | 否 | Microsoft OAuth 回调 |
 | `/` | DashboardPage | 是 | 概览，使用统计 |
-| `/teams` | TeamsPage | 是 | 团队预算管理 |
 | `/tokens` | TokensPage | 是 | API 密钥管理 |
 | `/models` | ModelsPage | 是 | 模型配置 |
 | `/playground` | PlaygroundPage | 是 | 测试对话 |
 | `/monitor` | MonitorPage | 是 | 使用量图表与分析 |
-| `/activity` | ActivityPage | 是 | 管理操作动态 |
-| `/admin-users` | AdminUsersPage | 是 | 管理员用户管理（仅 super_admin） |
 | `/settings` | SettingsPage | 是 | 账户设置 |
 
 ### 侧边栏导航
 
-`MainLayout.vue` 渲染持久左侧抽屉，包含以下菜单项：仪表板、团队、API 密钥、模型、Playground、监控、动态、管理员（仅 super_admin）、设置。顶部栏显示应用标题和用户菜单（邮箱、余额、设置、登出）。
+`MainLayout.vue` 渲染持久左侧抽屉，包含以下菜单项：仪表板、API 密钥、模型、Playground、监控、设置。顶部栏显示应用标题和用户菜单（邮箱、余额、设置、登出）。
 
 ---
 
@@ -525,7 +483,7 @@ graph TD
 
 ### Redis 分布式限流
 
-**Redis standalone** 实例运行在 `kbp`（sample-br-enterprise-proxy）命名空间中，为所有后端 Pod 提供分布式限流。
+**Redis standalone** 实例运行在 `kbp`（kolya-br-proxy）命名空间中，为所有后端 Pod 提供分布式限流。
 
 | 方面 | 详情 |
 |------|------|
@@ -941,24 +899,11 @@ total_cost  = $0.0025 + $0.00625 = $0.00875
 
 ### 8.4 令牌配额系统
 
-令牌支持两个级别的消费限额：
+每个 API 令牌（`APIToken.quota_usd`）可以有可选的消费限额。配额检查在每个请求开始时进行：
 
-| 配额类型 | 字段 | 范围 | 行为 |
-|---|---|---|---|
-| 总配额 | `quota_usd` | 令牌的整个生命周期 | 总消费硬性上限 |
-| 月度配额 | `monthly_quota_usd` | 每月重置 | 由 `monthly_reset_policy` 控制 |
-
-**月度重置策略：**
-- `reset` — 每月初用量计数器重置为零
-- `rollover` — 未使用的余额结转到下月（通过 `monthly_quota_start` 追踪）
-
-配额检查在每个请求开始时进行：
-
-1. 查询该令牌的 `usage_records` 中 `SUM(cost_usd)`（总计和月度窗口）
-2. 分别与 `quota_usd` 和 `monthly_quota_usd` 比较
-3. 若任一限额被超出，返回 **HTTP 429** 并提示：`Token quota exceeded. Used: $X.XX, Quota: $Y.YY`
-
-**团队配额** 添加了第三层限制：当令牌属于某个团队时，其从团队预算分配的 `allocated_usd` 作为额外的月度上限。每日限额自动计算为 `allocated_usd / 当月天数`。
+1. 查询该令牌的 `usage_records` 中 `SUM(cost_usd)`
+2. 与 `quota_usd` 比较
+3. 若 `total_used >= quota_usd`，返回 **HTTP 429** 并提示：`Token quota exceeded. Used: $X.XX, Quota: $Y.YY`
 
 使用量记录通过 `BackgroundTaskManager` **异步** 执行，以避免阻塞对客户端的响应。成本使用 `ModelPricing.calculate_cost()` 计算，若模型不在价格表中则回退到 Claude 3.5 Sonnet 定价。
 

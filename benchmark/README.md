@@ -1,6 +1,6 @@
 # Benchmark
 
-Locust-based performance testing for sample-br-enterprise-proxy. Tests API endpoints for latency baseline, TTFT, throughput, and stability.
+Locust-based performance testing for kolya-br-proxy. Tests API endpoints for latency baseline, TTFT, throughput, and stability.
 
 Supported endpoints:
 - **OpenAI** `/v1/chat/completions` (Bearer token)

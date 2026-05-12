@@ -1,4 +1,4 @@
-"""Locust benchmark for sample-br-enterprise-proxy — three API endpoints.
+"""Locust benchmark for kolya-br-proxy — three API endpoints.
 
 Usage:
     # Web UI

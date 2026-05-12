@@ -2,7 +2,7 @@
 
 ## 背景
 
-使用 `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL` 指向 sample-br-enterprise-proxy 时，Claude Code 偶发 403 Forbidden，而主请求（Opus）正常返回 200。
+使用 `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL` 指向 kolya-br-proxy 时，Claude Code 偶发 403 Forbidden，而主请求（Opus）正常返回 200。
 
 ---
 

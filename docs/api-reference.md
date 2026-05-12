@@ -339,7 +339,7 @@ The proxy supports three thinking types:
 
 #### Claude Code CLI compatibility
 
-All tokens use the `sk-ant-api03` prefix by default, which is compatible with the Claude Code CLI and Anthropic SDK. Simply create a token:
+To use the proxy with the Claude Code CLI or Anthropic SDK, create a token with the `sk-ant-api03` prefix:
 
 ```bash
 curl -X POST http://localhost:8000/admin/tokens \
@@ -347,6 +347,7 @@ curl -X POST http://localhost:8000/admin/tokens \
   -H "Authorization: Bearer <jwt_token>" \
   -d '{
     "name": "Claude Code Token",
+    "prefix": "sk-ant-api03",
     "quota_usd": 50.00
   }'
 ```
@@ -617,33 +618,27 @@ Update current user profile.
 
 #### POST /admin/tokens
 
-Create a new API token. All tokens use the `sk-ant-api03` prefix for Claude Code / Anthropic SDK compatibility.
+Create a new API token.
 
 **Request body**:
 
 ```json
 {
   "name": "My API Key",
-  "description": "Production key for team Alpha",
   "expires_at": "2026-12-31T23:59:59",
   "quota_usd": 100.00,
-  "monthly_quota_usd": 50.00,
-  "monthly_reset_policy": "reset",
   "allowed_ips": ["192.168.1.0/24"],
-  "token_metadata": {"team": "alpha", "environment": "production"}
+  "prefix": "kbr"
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Token display name |
-| `description` | string | no | Human-readable description of the token's purpose |
 | `expires_at` | datetime | no | Expiration timestamp |
-| `quota_usd` | decimal | no | Total usage quota in USD |
-| `monthly_quota_usd` | decimal | no | Monthly usage quota in USD |
-| `monthly_reset_policy` | string | no | `"reset"` (unused quota expires) or `"rollover"` (unused quota carries over) |
+| `quota_usd` | decimal | no | Usage quota in USD |
 | `allowed_ips` | array | no | IP allowlist (CIDR) |
-| `token_metadata` | object | no | Arbitrary key-value metadata |
+| `prefix` | string | no | Token prefix (default: `"kbr"`). Use `"sk-ant-api03"` for Claude Code / Anthropic SDK compatibility |
 
 **Response** (201): `TokenWithKeyResponse` -- includes the plain token value. This is the only time the plain token is returned.
 
@@ -651,29 +646,18 @@ Create a new API token. All tokens use the `sk-ant-api03` prefix for Claude Code
 {
   "id": "uuid",
   "name": "My API Key",
-  "description": "Production key for team Alpha",
-  "token": "sk-ant-api03_abc123...",
-  "key_prefix": "sk-ant-api03",
+  "token": "kbr_abc123...",
+  "key_prefix": "kbr",
   "expires_at": "2026-12-31T23:59:59",
   "quota_usd": "100.00",
-  "monthly_quota_usd": "50.00",
-  "daily_limit_usd": null,
-  "monthly_reset_policy": "reset",
   "used_usd": "0.00",
-  "monthly_used_usd": "0.00",
-  "daily_used_usd": "0.00",
   "remaining_quota": "100.00",
   "allowed_ips": ["192.168.1.0/24"],
   "is_active": true,
   "is_expired": false,
   "is_quota_exceeded": false,
   "created_at": "2026-01-01T00:00:00",
-  "last_used_at": null,
-  "token_metadata": {"team": "alpha", "environment": "production"},
-  "team_id": null,
-  "team_name": null,
-  "allocated_usd": null,
-  "allowed_models": []
+  "last_used_at": null
 }
 ```
 
@@ -686,35 +670,6 @@ List all tokens for the current user.
 | `include_inactive` | query | boolean | `false` | Include inactive/revoked tokens |
 
 **Response**: Array of `TokenResponse`.
-
-**`TokenResponse` schema**:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Token UUID |
-| `name` | string | Display name |
-| `description` | string \| null | Token description |
-| `key_prefix` | string | Token prefix (default: `"sk-ant-api03"`) |
-| `expires_at` | datetime \| null | Expiration timestamp |
-| `quota_usd` | string \| null | Total quota in USD |
-| `monthly_quota_usd` | string \| null | Monthly quota in USD |
-| `daily_limit_usd` | string \| null | Daily spending limit (set by team) |
-| `monthly_reset_policy` | string \| null | `"reset"` or `"rollover"` |
-| `used_usd` | string | Total usage in USD |
-| `monthly_used_usd` | string \| null | Usage in current month |
-| `daily_used_usd` | string \| null | Usage today |
-| `remaining_quota` | string \| null | Remaining total quota |
-| `allowed_ips` | array | IP allowlist |
-| `is_active` | boolean | Whether token is active |
-| `is_expired` | boolean | Whether token has expired |
-| `is_quota_exceeded` | boolean | Whether quota is exceeded |
-| `created_at` | datetime | Creation timestamp |
-| `last_used_at` | datetime \| null | Last usage timestamp |
-| `token_metadata` | object \| null | Arbitrary metadata |
-| `team_id` | string \| null | Associated team UUID |
-| `team_name` | string \| null | Associated team name |
-| `allocated_usd` | string \| null | Team allocation for this token |
-| `allowed_models` | array | List of allowed model IDs (empty = all models) |
 
 #### GET /admin/tokens/{token_id}
 
@@ -729,28 +684,12 @@ Update token settings.
 ```json
 {
   "name": "Renamed Key",
-  "description": "Updated description",
   "expires_at": "2027-06-30T00:00:00",
   "quota_usd": 200.00,
-  "monthly_quota_usd": 75.00,
-  "monthly_reset_policy": "rollover",
   "allowed_ips": ["10.0.0.0/8"],
-  "is_active": true,
-  "token_metadata": {"team": "beta"}
+  "is_active": true
 }
 ```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Token display name |
-| `description` | string | Token description |
-| `expires_at` | datetime | Expiration timestamp |
-| `quota_usd` | decimal | Total usage quota in USD |
-| `monthly_quota_usd` | decimal | Monthly usage quota in USD |
-| `monthly_reset_policy` | string | `"reset"` or `"rollover"` |
-| `allowed_ips` | array | IP allowlist (CIDR) |
-| `is_active` | boolean | Enable/disable token |
-| `token_metadata` | object | Arbitrary key-value metadata |
 
 #### DELETE /admin/tokens/{token_id}
 
@@ -766,7 +705,7 @@ Deactivate a token (can be reactivated via PUT).
 
 Retrieve the decrypted plain token value.
 
-**Response**: `{ "token": "sk-ant-api03_..." }`
+**Response**: `{ "token": "kbr_..." }`
 
 ### 2.3 Model Management
 
@@ -1189,282 +1128,6 @@ List all assignable resources (tokens, teams, models) for the permission editor 
   "models": [{ "id": "model-id", "name": "model-id" }]
 }
 ```
-
-### 2.7 Team Management
-
-Requires `manage_teams` permission. RBAC resource-level scoping applies (admins with an array of team IDs can only access those specific teams).
-
-#### POST /admin/teams
-
-Create a new team.
-
-**Request body**:
-
-```json
-{
-  "name": "Engineering Team",
-  "monthly_budget_usd": 500.00,
-  "monthly_reset_policy": "reset",
-  "daily_limit_enabled": true
-}
-```
-
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `name` | string | yes | — | Team display name |
-| `monthly_budget_usd` | decimal | yes | — | Monthly budget in USD |
-| `monthly_reset_policy` | string | no | `"reset"` | `"reset"` (unused budget expires) or `"rollover"` (unused budget carries over) |
-| `daily_limit_enabled` | boolean | no | `true` | Whether daily spending limits are enforced for members |
-
-**Response** (201): `TeamListItem`
-
-```json
-{
-  "id": "uuid",
-  "name": "Engineering Team",
-  "monthly_budget_usd": "500.00",
-  "monthly_reset_policy": "reset",
-  "daily_limit_enabled": true,
-  "member_count": 0,
-  "total_used_usd": "0.00",
-  "unallocated_pool_usd": "500.00",
-  "created_at": "2026-01-15T10:00:00"
-}
-```
-
-#### GET /admin/teams
-
-List all teams visible to the current user.
-
-**Response**: Array of `TeamListItem`.
-
-```json
-[
-  {
-    "id": "uuid",
-    "name": "Engineering Team",
-    "monthly_budget_usd": "500.00",
-    "monthly_reset_policy": "reset",
-    "daily_limit_enabled": true,
-    "member_count": 5,
-    "total_used_usd": "123.45",
-    "unallocated_pool_usd": "76.55",
-    "created_at": "2026-01-15T10:00:00"
-  }
-]
-```
-
-#### GET /admin/teams/{team_id}
-
-Get detailed team dashboard including all members.
-
-**Response**: `TeamDashboardResponse`
-
-```json
-{
-  "id": "uuid",
-  "name": "Engineering Team",
-  "monthly_budget_usd": "500.00",
-  "monthly_reset_policy": "reset",
-  "daily_limit_enabled": true,
-  "total_allocated_usd": "400.00",
-  "total_used_usd": "123.45",
-  "unallocated_pool_usd": "100.00",
-  "members": [
-    {
-      "token_id": "uuid",
-      "token_name": "Alice Dev Key",
-      "allocated_usd": "100.00",
-      "used_usd": "45.20",
-      "remaining_usd": "54.80",
-      "daily_limit_usd": "16.67",
-      "daily_used_usd": "3.50",
-      "is_active": true,
-      "last_used_at": "2026-01-15T09:30:00"
-    },
-    {
-      "token_id": "uuid",
-      "token_name": "Bob Dev Key",
-      "allocated_usd": "100.00",
-      "used_usd": "78.25",
-      "remaining_usd": "21.75",
-      "daily_limit_usd": "16.67",
-      "daily_used_usd": "0.00",
-      "is_active": true,
-      "last_used_at": "2026-01-14T18:00:00"
-    }
-  ]
-}
-```
-
-#### PUT /admin/teams/{team_id}
-
-Update team settings.
-
-**Request body** (all fields optional):
-
-```json
-{
-  "name": "Engineering Team v2",
-  "monthly_budget_usd": 750.00,
-  "monthly_reset_policy": "rollover",
-  "daily_limit_enabled": false
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Team display name |
-| `monthly_budget_usd` | decimal | Monthly budget in USD |
-| `monthly_reset_policy` | string | `"reset"` or `"rollover"` |
-| `daily_limit_enabled` | boolean | Whether daily limits are enforced |
-
-**Response**: Updated `TeamListItem`.
-
-#### DELETE /admin/teams/{team_id}
-
-Delete a team. Returns 204 No Content.
-
-#### POST /admin/teams/{team_id}/members
-
-Add an existing token as a team member with a budget allocation.
-
-**Request body**:
-
-```json
-{
-  "token_id": "uuid",
-  "allocated_usd": 100.00
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `token_id` | string | yes | UUID of the token to add |
-| `allocated_usd` | decimal | yes | Monthly allocation for this member in USD |
-
-**Response** (201): `TeamMemberSimpleResponse`
-
-```json
-{
-  "token_id": "uuid",
-  "token_name": "Alice Dev Key",
-  "allocated_usd": "100.00"
-}
-```
-
-#### DELETE /admin/teams/{team_id}/members/{token_id}
-
-Remove a member from the team. Returns 204 No Content.
-
-#### PUT /admin/teams/{team_id}/members/{token_id}
-
-Adjust a member's budget allocation.
-
-**Request body**:
-
-```json
-{
-  "allocated_usd": 150.00
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `allocated_usd` | decimal | yes | New monthly allocation in USD |
-
-**Response**: Updated `TeamMemberSimpleResponse`.
-
-#### POST /admin/teams/{team_id}/transfer
-
-Transfer allocation between two team members.
-
-**Request body**:
-
-```json
-{
-  "from_token_id": "uuid-source",
-  "to_token_id": "uuid-destination",
-  "amount": 25.00
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `from_token_id` | string | yes | Source member token UUID |
-| `to_token_id` | string | yes | Destination member token UUID |
-| `amount` | decimal | yes | Amount to transfer in USD |
-
-**Response**:
-
-```json
-{
-  "from_token_id": "uuid-source",
-  "from_token_name": "Alice Dev Key",
-  "from_allocated_usd": "75.00",
-  "to_token_id": "uuid-destination",
-  "to_token_name": "Bob Dev Key",
-  "to_allocated_usd": "125.00"
-}
-```
-
-#### POST /admin/teams/{team_id}/members/batch
-
-Batch create new tokens and add them as team members in one operation.
-
-**Request body**:
-
-```json
-{
-  "names": "alice-key, bob-key, carol-key",
-  "per_member_allocation": 80.00,
-  "expires_at": "2026-12-31T23:59:59",
-  "quota_usd": 500.00,
-  "allowed_ips": ["10.0.0.0/8"],
-  "token_metadata": {"department": "engineering"},
-  "model_names": ["claude-sonnet-4-5", "claude-haiku-3-5"]
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `names` | string | yes | Comma-separated list of token names to create |
-| `per_member_allocation` | decimal | yes | Monthly allocation per member in USD |
-| `expires_at` | datetime | no | Expiration for all created tokens |
-| `quota_usd` | decimal | no | Total quota for each token |
-| `allowed_ips` | array | no | IP allowlist for all tokens |
-| `token_metadata` | object | no | Metadata applied to all tokens |
-| `model_names` | array | no | Model names to allow for all tokens |
-
-**Response** (201): `BatchCreateMembersResponse`
-
-```json
-{
-  "created": [
-    {
-      "token_id": "uuid-1",
-      "token_name": "alice-key",
-      "token": "sk-ant-api03_alice123...",
-      "allocated_usd": "80.00"
-    },
-    {
-      "token_id": "uuid-2",
-      "token_name": "bob-key",
-      "token": "sk-ant-api03_bob456...",
-      "allocated_usd": "80.00"
-    },
-    {
-      "token_id": "uuid-3",
-      "token_name": "carol-key",
-      "token": "sk-ant-api03_carol789...",
-      "allocated_usd": "80.00"
-    }
-  ],
-  "total": 3
-}
-```
-
-> **Note**: The plain token values are only returned in this response. Store them securely.
 
 ---
 
