@@ -1,6 +1,6 @@
 # Prompt Caching
 
-BR Enterprise Proxy supports automatic prompt cache injection for Anthropic models on AWS Bedrock. This feature reduces costs and latency by caching stable prefixes (system prompts, tool definitions, conversation history) across requests.
+Kolya BR Proxy supports automatic prompt cache injection for Anthropic models on AWS Bedrock. This feature reduces costs and latency by caching stable prefixes (system prompts, tool definitions, conversation history) across requests.
 
 ## How It Works
 
