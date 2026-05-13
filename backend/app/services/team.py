@@ -140,11 +140,12 @@ class TeamService:
             .options(joinedload(TeamMember.token))
         )
         token_hashes = []
+        now = datetime.utcnow()
         for member in members_result.scalars().all():
             if member.token and not member.token.is_deleted:
                 member.token.is_deleted = True
                 member.token.is_active = False
-                member.token.deleted_at = datetime.utcnow()
+                member.token.deleted_at = now
                 if member.token.token_hash:
                     token_hashes.append(member.token.token_hash)
 

@@ -1,5 +1,6 @@
 """Team management endpoints."""
 
+import asyncio
 import calendar
 import re
 from datetime import datetime
@@ -428,8 +429,8 @@ async def delete_team(
     service = TeamService(db)
     token_hashes = await service.delete_team(team_uuid, current_user.id)
 
-    for th in token_hashes:
-        await _invalidate_token_cache(th)
+    if token_hashes:
+        await asyncio.gather(*[_invalidate_token_cache(th) for th in token_hashes])
 
     await audit_service.log(
         action=AuditAction.TEAM_DELETED,
