@@ -72,6 +72,8 @@ app.add_middleware(
 )
 ```
 
+**Preflight reliability**: `SecurityMiddleware` handles OPTIONS requests directly — returning CORS headers without calling `call_next()`. This prevents intermittent header loss that can occur when `BaseHTTPMiddleware` passes preflight requests through the full middleware chain. The CORS headers on preflight responses are thus guaranteed regardless of inner middleware behavior.
+
 **Per-environment policy**:
 
 | Environment | `KBR_ALLOWED_ORIGINS` | Security Level |
@@ -421,8 +423,8 @@ The WAF WebACL contains five rules, evaluated in priority order:
 
 | Priority | Rule | Type | Threshold / Action | Purpose |
 |----------|------|------|--------------------|---------|
-| 1 | `rate-limit-auth` | Rate-based (scoped) | 20 req / 5 min per IP on `/admin/auth/*` | Prevent OAuth brute force |
-| 2 | `rate-limit-chat` | Rate-based (scoped) | 300 req / 5 min per IP on `/v1/chat/completions` | Prevent API abuse |
+| 1 | `rate-limit-auth` | Rate-based (scoped) | 50 req / 5 min per IP on `/admin/auth/*` (excludes OPTIONS) | Prevent OAuth brute force |
+| 2 | `rate-limit-inference` | Rate-based (scoped) | 300 req / 5 min per IP on `/v1/chat/completions`, `/v1/messages`, `/v1beta/models/` | Prevent API abuse |
 | 3 | `aws-managed-common` | AWS Managed Rule Group | AWSManagedRulesCommonRuleSet (some rules overridden to Count) | SQLi, XSS, and other common exploits |
 | 4 | `aws-managed-known-bad-inputs` | AWS Managed Rule Group | AWSManagedRulesKnownBadInputsRuleSet | Known malicious payloads (Log4j, etc.) |
 | 5 | `rate-limit-global` | Rate-based (global) | 2000 req / 5 min per IP | Global abuse prevention |
@@ -453,8 +455,8 @@ Certain rules in `AWSManagedRulesCommonRuleSet` produce false positives on legit
 
 | Endpoint | Limit | Rationale |
 |----------|-------|-----------|
-| `/admin/auth/*` | 20 / 5 min | OAuth login involves redirects and token exchange. Legitimate users perform at most a few logins per session. A low limit effectively blocks credential-stuffing and brute-force attempts. |
-| `/v1/chat/completions` | 300 / 5 min | Each chat completion request invokes a Bedrock model call (costly). 300 per 5 minutes (1 req/sec average) is sufficient for normal usage while preventing runaway scripts. |
+| `/admin/auth/*` | 50 / 5 min (excludes OPTIONS) | OAuth login involves redirects and token exchange. OPTIONS preflight requests are excluded from counting because browsers send preflight before every cross-origin request, and counting them inflates the rate unfairly — this previously caused intermittent CORS failures. |
+| `/v1/chat/completions`, `/v1/messages`, `/v1beta/models/` | 300 / 5 min | Each inference request invokes a Bedrock model call (costly). 300 per 5 minutes (1 req/sec average) is sufficient for normal usage while preventing runaway scripts. |
 | Global | 2000 / 5 min | Covers all endpoints including static assets, health checks, and API calls. Generous enough for legitimate browsing but blocks automated scanners and DDoS. |
 
 ### WAF Association
@@ -485,7 +487,7 @@ The WAF WebACL is associated with two ALBs (created by Kubernetes ALB Controller
 | `waf_frontend_alb_name` | string | `kolya-br-proxy-frontend-alb` | Frontend ALB name for auto-discovery |
 | `waf_api_alb_name` | string | `kolya-br-proxy-api-alb` | API ALB name for auto-discovery |
 | `waf_rate_limit_global` | number | `2000` | Global rate limit (req / 5 min) |
-| `waf_rate_limit_auth` | number | `20` | Auth endpoint rate limit (req / 5 min) |
+| `waf_rate_limit_auth` | number | `50` | Auth endpoint rate limit (req / 5 min, excludes OPTIONS) |
 | `waf_rate_limit_chat` | number | `300` | Chat endpoint rate limit (req / 5 min) |
 
 ### Monitoring
@@ -635,6 +637,62 @@ When a token is deleted via `DELETE /admin/tokens/{token_id}`, three layers ensu
 | 3 | Cache-hit guard | Even if a stale cache is hit (race condition), `is_active` is checked before returning the token |
 
 The token is soft-deleted (`is_deleted = true`) to preserve historical usage data for reporting, but `is_active = false` is the authoritative gate for API access.
+
+---
+
+## Secure Key Export (Preventing Plaintext Key Leakage)
+
+### Design Principle
+
+Super admins need to export all API keys (including plaintext values) for audit or migration purposes. However, **plaintext keys must never appear in any XHR/JSON response** — even if an attacker monitors DevTools Network tab, browser extensions intercept responses, or XSS scripts read JavaScript variables, they cannot obtain key values.
+
+### Solution: `window.open()` File Download
+
+The export uses browser-native navigation (`window.open()`) instead of XHR/fetch:
+
+```
+┌─────────────┐         XHR/fetch           ┌──────────┐
+│   Frontend  │  ◄──────────────────────►   │  Backend │
+│             │   key_prefix only (no key)  │          │
+└─────────────┘                             └──────────┘
+
+┌─────────────┐      window.open (HTTPS)     ┌──────────┐
+│   Browser   │  ─────── download CSV ────►  │  Backend │
+│  Download   │  ◄─── Content-Disposition ── │ decrypt  │
+│  Manager    │    file saved to disk,       └──────────┘
+└─────────────┘    never enters JS runtime
+```
+
+### Why `window.open()` Is Secure
+
+| Attack Vector | XHR/fetch Response | `window.open()` Download |
+|--------------|-------------------|--------------------------|
+| DevTools Network tab (XHR/Fetch panel) | Visible — response body readable | Not shown — browser navigation responses bypass the XHR panel |
+| JavaScript variables | `response.data` stored in memory, accessible to XSS | No JS variable holds the data — response goes directly to download manager |
+| Browser extensions / interceptors | Can hook `XMLHttpRequest` and `fetch` | Cannot intercept browser-native navigation responses |
+| Axios interceptors / Pinia devtools | Captured and logged | Not triggered — request is outside the app's HTTP client |
+
+### Two Isolated Data Paths
+
+1. **Normal API interaction (XHR/fetch)** — `GET /admin/tokens` returns `TokenResponse` with only `key_prefix: "sk-ant-api03"`. The full key value is **never** included in any JSON response.
+
+2. **CSV export (`window.open()`)** — Only `GET /admin/tokens/export/keys` calls `decrypt_token()` to retrieve plaintext values. The response is a `Content-Disposition: attachment` file download that the browser saves directly to disk without passing through the JavaScript runtime.
+
+### Security Measures on the Export Endpoint
+
+| Measure | Implementation |
+|---------|---------------|
+| Authentication | JWT from `?token=` query param or `Authorization` header |
+| Authorization | `super_admin` role required (403 for all other roles) |
+| Transport | HTTPS encrypts the URL (including the JWT query param) in transit |
+| Caching | `Cache-Control: no-store` prevents browser/proxy caching |
+| Token expiry | JWT has a short lifetime; even if URL is captured from browser history, it expires quickly |
+| No CORS | File download is same-origin navigation; no cross-origin access possible |
+
+### Key Files
+
+- `backend/app/api/admin/endpoints/tokens.py` — `export_keys_csv()` endpoint
+- `frontend/src/pages/DashboardPage.vue` — `exportKeys()` function using `window.open()`
 
 ---
 

@@ -72,6 +72,8 @@ app.add_middleware(
 )
 ```
 
+**预检可靠性**：`SecurityMiddleware` 直接处理 OPTIONS 请求——返回 CORS 头时不调用 `call_next()`。这防止了 `BaseHTTPMiddleware` 将预检请求传递给完整中间件链时可能出现的间歇性头丢失。预检响应上的 CORS 头因此不受内部中间件行为影响，始终保证存在。
+
 **分环境策略**：
 
 | 环境 | `KBR_ALLOWED_ORIGINS` | 安全等级 |
@@ -421,8 +423,8 @@ WAF WebACL 包含 5 条规则，按优先级顺序评估：
 
 | 优先级 | 规则名 | 类型 | 阈值 / 动作 | 目的 |
 |--------|-------|------|------------|------|
-| 1 | `rate-limit-auth` | 限速（路径范围） | 单 IP 20 次 / 5 分钟，作用于 `/admin/auth/*` | 防止 OAuth 暴力破解 |
-| 2 | `rate-limit-chat` | 限速（路径范围） | 单 IP 300 次 / 5 分钟，作用于 `/v1/chat/completions` | 防止 API 滥用 |
+| 1 | `rate-limit-auth` | 限速（路径范围） | 单 IP 50 次 / 5 分钟，作用于 `/admin/auth/*`（排除 OPTIONS） | 防止 OAuth 暴力破解 |
+| 2 | `rate-limit-inference` | 限速（路径范围） | 单 IP 300 次 / 5 分钟，作用于 `/v1/chat/completions`、`/v1/messages`、`/v1beta/models/` | 防止 API 滥用 |
 | 3 | `aws-managed-common` | AWS 托管规则组 | AWSManagedRulesCommonRuleSet（部分规则降级为 Count） | SQLi、XSS 等通用攻击防护 |
 | 4 | `aws-managed-known-bad-inputs` | AWS 托管规则组 | AWSManagedRulesKnownBadInputsRuleSet | 已知恶意载荷（Log4j 等） |
 | 5 | `rate-limit-global` | 限速（全局） | 单 IP 2000 次 / 5 分钟 | 全局滥用防护 |
@@ -453,8 +455,8 @@ WAF WebACL 包含 5 条规则，按优先级顺序评估：
 
 | 端点 | 限制 | 依据 |
 |------|------|------|
-| `/admin/auth/*` | 20 次 / 5 分钟 | OAuth 登录涉及重定向和令牌交换。合法用户每次会话最多进行几次登录。低阈值可有效阻止凭证填充和暴力破解尝试。 |
-| `/v1/chat/completions` | 300 次 / 5 分钟 | 每个聊天完成请求都会调用 Bedrock 模型（成本较高）。300 次 / 5 分钟（平均 1 次/秒）足以满足正常使用，同时阻止失控的脚本。 |
+| `/admin/auth/*` | 50 次 / 5 分钟（排除 OPTIONS） | OAuth 登录涉及重定向和令牌交换。OPTIONS 预检请求被排除在计数之外，因为浏览器在每次跨域请求前都会发送预检，计入限速会不公平地膨胀计数——此前曾导致间歇性 CORS 失败。 |
+| `/v1/chat/completions`、`/v1/messages`、`/v1beta/models/` | 300 次 / 5 分钟 | 每个推理请求都会调用 Bedrock 模型（成本较高）。300 次 / 5 分钟（平均 1 次/秒）足以满足正常使用，同时阻止失控的脚本。 |
 | 全局 | 2000 次 / 5 分钟 | 覆盖所有端点，包括静态资源、健康检查和 API 调用。对合法浏览足够宽松，但能阻止自动化扫描器和 DDoS。 |
 
 ### WAF 关联
@@ -485,7 +487,7 @@ WAF WebACL 关联到两个 ALB（由 Kubernetes ALB Controller 创建，Terrafor
 | `waf_frontend_alb_name` | string | `kolya-br-proxy-frontend-alb` | Frontend ALB 名称（用于自动发现） |
 | `waf_api_alb_name` | string | `kolya-br-proxy-api-alb` | API ALB 名称（用于自动发现） |
 | `waf_rate_limit_global` | number | `2000` | 全局限流（次 / 5 分钟） |
-| `waf_rate_limit_auth` | number | `20` | 认证端点限流（次 / 5 分钟） |
+| `waf_rate_limit_auth` | number | `50` | 认证端点限流（次 / 5 分钟，排除 OPTIONS） |
 | `waf_rate_limit_chat` | number | `300` | 聊天端点限流（次 / 5 分钟） |
 
 ### 监控
@@ -636,6 +638,61 @@ def hash_token(token: str) -> str:
 | 3 | 缓存命中守卫 | 即使竞态条件下命中旧缓存，也会检查 `is_active` 后拒绝 |
 
 Token 采用软删除（`is_deleted = true`）以保留历史用量数据用于报表，但 `is_active = false` 是 API 访问的权威拦截门。
+
+---
+
+## 安全密钥导出（防止明文 Key 泄漏）
+
+### 设计原则
+
+超级管理员需要导出所有 API Key（含明文值）用于审计或迁移。但**明文 Key 绝不能出现在任何 XHR/JSON 响应中**——即使攻击者监控 DevTools Network 面板、浏览器插件拦截响应、或 XSS 脚本读取 JavaScript 变量，都无法获取 Key 值。
+
+### 方案：`window.open()` 文件下载
+
+导出使用浏览器原生导航（`window.open()`）而非 XHR/fetch：
+
+```
+┌─────────────┐         XHR/fetch           ┌──────────┐
+│   前端      │  ◄──────────────────────►   │  后端    │
+│             │   仅返回 key_prefix         │          │
+└─────────────┘   (无完整 key)              └──────────┘
+
+┌─────────────┐      window.open (HTTPS)     ┌──────────┐
+│   浏览器    │  ─────── 下载 CSV ────────►  │  后端    │
+│   下载管理器│  ◄─── Content-Disposition ── │ decrypt  │
+└─────────────┘    文件直接存盘，不进入 JS   └──────────┘
+```
+
+### 为什么 `window.open()` 是安全的
+
+| 攻击向量 | XHR/fetch 响应 | `window.open()` 下载 |
+|---------|---------------|---------------------|
+| DevTools Network 面板（XHR/Fetch 标签） | 可见——响应体可读 | 不显示——浏览器导航响应绕过 XHR 面板 |
+| JavaScript 变量 | `response.data` 存储在内存中，XSS 可读取 | 无 JS 变量持有数据——响应直接进入下载管理器 |
+| 浏览器插件 / 拦截器 | 可 hook `XMLHttpRequest` 和 `fetch` | 无法拦截浏览器原生导航响应 |
+| Axios 拦截器 / Pinia devtools | 被捕获和记录 | 不会触发——请求在应用 HTTP 客户端之外 |
+
+### 两条完全隔离的数据路径
+
+1. **正常前后端交互（XHR/fetch）**—— `GET /admin/tokens` 返回的 `TokenResponse` 仅包含 `key_prefix: "sk-ant-api03"`。完整 Key 值**永远不会**出现在任何 JSON 响应中。
+
+2. **CSV 导出（`window.open()`）**—— 仅 `GET /admin/tokens/export/keys` 会调用 `decrypt_token()` 获取明文值。响应是 `Content-Disposition: attachment` 文件下载，浏览器将其直接保存到磁盘，不经过 JavaScript 运行时。
+
+### 导出端点的安全措施
+
+| 措施 | 实现方式 |
+|------|---------|
+| 身份验证 | 从 `?token=` URL 参数或 `Authorization` 头获取 JWT |
+| 授权 | 要求 `super_admin` 角色（其他角色返回 403） |
+| 传输安全 | HTTPS 加密 URL（包括 JWT 查询参数）在传输中 |
+| 防缓存 | `Cache-Control: no-store` 防止浏览器/代理缓存响应 |
+| Token 过期 | JWT 有较短的有效期；即使 URL 被浏览器历史记录捕获，也会很快失效 |
+| 无 CORS | 文件下载是同源导航；不存在跨域访问的可能 |
+
+### 关键文件
+
+- `backend/app/api/admin/endpoints/tokens.py` — `export_keys_csv()` 端点
+- `frontend/src/pages/DashboardPage.vue` — `exportKeys()` 函数，使用 `window.open()`
 
 ---
 
