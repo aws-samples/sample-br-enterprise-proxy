@@ -269,7 +269,6 @@ async def check_alerts_for_usage(
 
     # 2. Batch cooldown check — single query for all rule IDs
     rule_ids = [r.id for r in rules]
-    min_cooldown = min(r.cooldown_hours for r in rules)
     cutoff = datetime.utcnow() - timedelta(hours=max(r.cooldown_hours for r in rules))
     cooldown_q = (
         select(AlertNotification.alert_rule_id, func.max(AlertNotification.created_at))

@@ -14,7 +14,6 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
