@@ -7,10 +7,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_audit_log_service, require_permission
 from app.core.database import get_db
+from app.models.alert import AlertRule
 from app.models.audit_log import AuditAction
 from app.models.user import User
 from app.services import alert as alert_service
@@ -234,6 +236,14 @@ async def delete_alert_rule(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid rule ID"
         )
 
+    # Fetch rule details before deletion for audit log
+    result = await db.execute(
+        select(AlertRule).where(
+            AlertRule.id == rule_uuid, AlertRule.user_id == current_user.id
+        )
+    )
+    rule = result.scalar_one_or_none()
+
     deleted = await alert_service.delete_rule(
         db=db, rule_id=rule_uuid, user_id=current_user.id
     )
@@ -246,6 +256,13 @@ async def delete_alert_rule(
         user=current_user,
         resource_type="alert_rule",
         resource_id=rule_id,
+        details={
+            "rule_key": rule.rule_key,
+            "threshold": str(rule.threshold_value),
+            "scope": "team" if rule.team_id else "token",
+        }
+        if rule
+        else None,
     )
     return None
 
