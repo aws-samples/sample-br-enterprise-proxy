@@ -14,9 +14,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "alert_rules_team_id_fkey", "alert_rules", type_="foreignkey"
-    )
+    op.drop_constraint("alert_rules_team_id_fkey", "alert_rules", type_="foreignkey")
     op.create_foreign_key(
         "alert_rules_team_id_fkey",
         "alert_rules",
@@ -26,9 +24,7 @@ def upgrade() -> None:
         ondelete="CASCADE",
     )
 
-    op.drop_constraint(
-        "alert_rules_token_id_fkey", "alert_rules", type_="foreignkey"
-    )
+    op.drop_constraint("alert_rules_token_id_fkey", "alert_rules", type_="foreignkey")
     op.create_foreign_key(
         "alert_rules_token_id_fkey",
         "alert_rules",
@@ -40,9 +36,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "alert_rules_token_id_fkey", "alert_rules", type_="foreignkey"
-    )
+    op.drop_constraint("alert_rules_token_id_fkey", "alert_rules", type_="foreignkey")
     op.create_foreign_key(
         "alert_rules_token_id_fkey",
         "alert_rules",
@@ -51,9 +45,7 @@ def downgrade() -> None:
         ["id"],
     )
 
-    op.drop_constraint(
-        "alert_rules_team_id_fkey", "alert_rules", type_="foreignkey"
-    )
+    op.drop_constraint("alert_rules_team_id_fkey", "alert_rules", type_="foreignkey")
     op.create_foreign_key(
         "alert_rules_team_id_fkey",
         "alert_rules",

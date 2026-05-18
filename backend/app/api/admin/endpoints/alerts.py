@@ -133,7 +133,9 @@ def _notification_to_response(n) -> AlertNotificationResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/rules", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/rules", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_alert_rule(
     request: CreateAlertRuleRequest,
     current_user: User = Depends(require_permission("manage_api_keys")),
@@ -160,8 +162,11 @@ async def create_alert_rule(
         user=current_user,
         resource_type="alert_rule",
         resource_id=str(rule.id),
-        details={"rule_key": rule.rule_key, "threshold": str(rule.threshold_value),
-                 "scope": "team" if rule.team_id else "token"},
+        details={
+            "rule_key": rule.rule_key,
+            "threshold": str(rule.threshold_value),
+            "scope": "team" if rule.team_id else "token",
+        },
     )
     return _rule_to_response(rule)
 
@@ -193,12 +198,18 @@ async def update_alert_rule(
     try:
         rule_uuid = UUID(rule_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid rule ID")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid rule ID"
+        )
 
     kwargs = request.model_dump(exclude_none=True)
-    rule = await alert_service.update_rule(db=db, rule_id=rule_uuid, user_id=current_user.id, **kwargs)
+    rule = await alert_service.update_rule(
+        db=db, rule_id=rule_uuid, user_id=current_user.id, **kwargs
+    )
     if not rule:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found"
+        )
     await audit_service.log(
         action=AuditAction.ALERT_RULE_UPDATED,
         user=current_user,
@@ -219,11 +230,17 @@ async def delete_alert_rule(
     try:
         rule_uuid = UUID(rule_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid rule ID")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid rule ID"
+        )
 
-    deleted = await alert_service.delete_rule(db=db, rule_id=rule_uuid, user_id=current_user.id)
+    deleted = await alert_service.delete_rule(
+        db=db, rule_id=rule_uuid, user_id=current_user.id
+    )
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alert rule not found"
+        )
     await audit_service.log(
         action=AuditAction.ALERT_RULE_DELETED,
         user=current_user,
@@ -260,7 +277,9 @@ async def get_unread_count(
     return UnreadCountResponse(count=count)
 
 
-@router.post("/notifications/{notification_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/notifications/{notification_id}/read", status_code=status.HTTP_204_NO_CONTENT
+)
 async def mark_notification_read(
     notification_id: str,
     current_user: User = Depends(require_permission("manage_api_keys")),
@@ -269,11 +288,17 @@ async def mark_notification_read(
     try:
         n_uuid = UUID(notification_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid notification ID")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid notification ID"
+        )
 
-    marked = await alert_service.mark_read(db=db, notification_id=n_uuid, user_id=current_user.id)
+    marked = await alert_service.mark_read(
+        db=db, notification_id=n_uuid, user_id=current_user.id
+    )
     if not marked:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found"
+        )
     return None
 
 

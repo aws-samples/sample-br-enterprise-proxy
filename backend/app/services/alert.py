@@ -84,10 +84,14 @@ async def create_rule(
         row = tm_result.first()
         if rule_key == "monthly_quota_pct":
             if not row or not row[0].allocated_usd:
-                raise ValueError("monthly_quota_pct requires a team token with monthly quota")
+                raise ValueError(
+                    "monthly_quota_pct requires a team token with monthly quota"
+                )
         if rule_key == "daily_limit_pct":
             if not row or not row[0].allocated_usd or not row[1]:
-                raise ValueError("daily_limit_pct requires a team token with daily limit enabled")
+                raise ValueError(
+                    "daily_limit_pct requires a team token with daily limit enabled"
+                )
 
     rule = AlertRule(
         id=uuid_mod.uuid4(),
@@ -340,9 +344,7 @@ async def check_alerts_for_usage(
             team_token_ids = [r[0] for r in tm_result.all()]
             if team_token_ids:
                 team_usage_q = select(
-                    func.coalesce(
-                        func.sum(UsageRecord.cost_usd), Decimal("0.00")
-                    )
+                    func.coalesce(func.sum(UsageRecord.cost_usd), Decimal("0.00"))
                 ).where(
                     UsageRecord.token_id.in_(team_token_ids),
                     UsageRecord.created_at >= month_start,
@@ -367,7 +369,11 @@ async def check_alerts_for_usage(
         if alloc_row:
             allocated_usd = alloc_row[0] or Decimal("0.00")
 
-    effective_monthly = allocated_usd if allocated_usd > 0 else (token_obj.monthly_quota_usd or Decimal("0.00"))
+    effective_monthly = (
+        allocated_usd
+        if allocated_usd > 0
+        else (token_obj.monthly_quota_usd or Decimal("0.00"))
+    )
 
     def get_metric(rule: AlertRule) -> Optional[Decimal]:
         key = rule.rule_key
@@ -457,9 +463,7 @@ async def check_alerts_for_usage(
             pending_notifications.append(notification)
 
         except Exception:
-            logger.warning(
-                "Failed to process alert rule %s", rule.id, exc_info=True
-            )
+            logger.warning("Failed to process alert rule %s", rule.id, exc_info=True)
 
     if pending_notifications:
         db.add_all(pending_notifications)
